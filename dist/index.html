@@ -2,36 +2,31 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#101718"><meta name="description" content="카메라와 수동 영역 지정으로 RAM 조립 안내를 검증하는 FixLens 프로토타입">
-  <title>FixLens · 카메라 조립 가이드</title><link rel="stylesheet" href="./style.css">
+  <meta name="theme-color" content="#101718"><meta name="description" content="기기 안에서 AI로 실시간 물체를 인식하는 FixLens 카메라">
+  <title>FixLens · AI 카메라</title><link rel="stylesheet" href="./style.css">
 </head>
 <body>
-  <header><a class="brand" href="./"><span class="logo" aria-hidden="true">⌗</span> FixLens</a><span class="version">RAM 조립 가이드 <b>PROTOTYPE</b></span></header>
+  <header><a class="brand" href="./"><span class="logo" aria-hidden="true">⌗</span> FixLens</a><span class="version">실시간 물체 인식 <b>PROTOTYPE</b></span></header>
   <main>
-    <section class="intro"><div><span class="eyebrow">ASSEMBLY WORKSPACE</span><h1>보고, 맞추고, 확인하세요.</h1></div><p>자동 인식 전 단계입니다.<br>실시간 카메라 영상에 부품 위치를 직접 지정하세요.</p></section>
+    <section class="intro"><div><span class="eyebrow">ON-DEVICE VISION</span><h1>비추면, AI가 알아봅니다.</h1></div><p>카메라 영상은 이 기기에 머뭅니다.<br>AI가 물체의 종류와 위치를 자동으로 찾습니다.</p></section>
     <div class="workspace">
-      <section class="viewer-panel" aria-label="카메라 및 위치 지정">
+      <section class="viewer-panel" aria-label="카메라 및 AI 인식 결과">
         <div class="viewer-toolbar"><strong>내 카메라</strong><span id="sourceLabel">연결 대기</span></div>
-        <div id="stage" class="stage"><video id="video" autoplay muted playsinline></video><canvas id="canvas" width="1280" height="720" aria-label="실시간 카메라 위에서 선택한 부품 영역을 드래그하여 지정하세요."></canvas><span id="canvasTag" class="canvas-tag" hidden>실시간 영상 · 수동 위치 지정</span><div id="cameraEmpty" class="camera-empty"><strong id="emptyTitle">카메라를 연결하세요</strong><p>휴대폰 후면 카메라 또는 연결된 웹캠의<br>실시간 영상을 사용합니다.</p><button id="startCamera" class="primary">카메라 연결</button></div></div>
-        <div class="legend"><span><i class="target"></i>타겟 슬롯</span><span><i class="ram"></i>RAM</span><span><i class="other"></i>다른 슬롯</span></div>
+        <div id="stage" class="stage"><video id="video" autoplay muted playsinline></video><canvas id="canvas" width="1280" height="720" aria-label="AI가 검출한 물체 위치와 신뢰도"></canvas><span id="canvasTag" class="canvas-tag" hidden>실시간 영상 · 기기 내 AI</span><div id="cameraEmpty" class="camera-empty"><strong id="emptyTitle">카메라를 연결하세요</strong><p>휴대폰 후면 카메라 또는 연결된 웹캠의<br>실시간 영상을 사용합니다.</p><button id="startCamera" class="primary">카메라 연결</button></div></div>
         <div id="cameraControls">
           <div class="camera-actions"><button id="stopCamera" disabled>카메라 끄기</button><select id="facing" aria-label="카메라 방향"><option value="environment">후면 카메라</option><option value="user">전면 카메라</option></select></div>
-          <p id="cameraMessage" role="status">카메라를 켠 후 슬롯과 RAM 영역을 직접 지정하세요. 영상은 서버로 전송되지 않습니다.</p>
-          <fieldset id="tools" disabled><legend>화면에서 드래그해 영역 지정</legend><div class="tool-buttons"><button data-tool="target" aria-pressed="true">① 타겟 슬롯</button><button data-tool="other" aria-pressed="false">② 다른 슬롯</button><button data-tool="ram" aria-pressed="false">③ RAM</button><button data-tool="move" aria-pressed="false">RAM 이동</button></div>
-          <div class="toggles"><label><input id="reversed" type="checkbox"> RAM 역방향</label><label><input id="hiddenRam" type="checkbox"> RAM 가림</label></div>
-          <label class="slider-label">RAM 좌우 위치<input id="ramX" type="range" min="0" max="100" value="50"></label><label class="slider-label">RAM 상하 위치<input id="ramY" type="range" min="0" max="100" value="50"></label>
-          <button id="clearBoxes">영역 다시 지정</button></fieldset>
+          <p id="cameraMessage" role="status">카메라 연결 후 AI가 자동으로 시작됩니다. 병·컵·책을 비춰보세요.</p>
         </div>
 
       </section>
       <aside class="guide-panel">
-        <div class="panel-heading"><span class="eyebrow">LIVE GUIDE</span><button id="reset" class="text-button">작업 초기화 ↺</button></div>
-        <ol id="steps" class="steps"><li data-state="SCAN"><span>01</span><div><strong>위치 확인</strong><small>RAM과 슬롯 입력</small></div></li><li data-state="GUIDE"><span>02</span><div><strong>슬롯으로 이동</strong><small>위치와 방향 정렬</small></div></li><li data-state="ERROR_CHECK"><span>03</span><div><strong>정상 위치 유지</strong><small>0.5초 연속 확인</small></div></li><li data-state="COMPLETE"><span>04</span><div><strong>직접 체결 확인</strong><small>양쪽 걸쇠 확인</small></div></li></ol>
-        <div id="statusCard" class="status-card"><span id="stateLabel">위치 확인</span><p id="message" role="status" aria-live="polite">RAM과 타겟 슬롯의 위치를 확인하세요.</p><progress id="progress" max="1" value="0" aria-label="정상 위치 유지 진행률"></progress></div>
-        <div class="metrics"><div><span>작업 시간</span><strong id="elapsed">0.0<small>초</small></strong></div><div><span>오류 발생</span><strong id="errors">0<small>회</small></strong></div></div>
-        <div class="scope-note"><strong>지금 확인할 수 있는 것</strong><p>입력한 위치의 정렬, 방향 오류, 오슬롯 접근과 복구 흐름을 확인합니다. 실제 RAM 추적이나 체결 상태를 자동으로 인식하지 않습니다.</p></div>
+        <div class="panel-heading"><span class="eyebrow">AI VISION</span><span id="modelBadge" class="model-badge">대기</span></div>
+        <div class="status-card model-card"><strong>이 기기에서 인식</strong><p id="modelMessage" role="status" aria-live="polite">카메라를 연결하면 AI 모델을 준비합니다.</p><button id="retryModel" hidden>AI 다시 불러오기</button></div>
+        <div class="metrics"><div><span>인식된 물체</span><strong id="count">0</strong></div><div><span>최근 추론 시간</span><strong id="latency" class="latency">—</strong></div></div>
+        <h2 class="results-title">인식 결과</h2><ul id="objects" class="objects"><li class="empty-result">카메라와 AI가 준비되면 결과가 표시됩니다.</li></ul>
+        <div class="scope-note"><strong>병 · 컵 · 책 · 휴대폰</strong><p>일상 물체 80종을 학습한 경량 모델을 사용합니다. 모든 물체를 인식하지는 않으며, RAM이나 장착 상태는 판정하지 않습니다.</p><p>COCO-SSD · MobileNet V2 Lite<br><span id="backend">실행 대기</span> · 신뢰도 50% 이상 표시</p><p>첫 실행에는 모델 다운로드가 필요합니다. 촬영 영상은 서버로 전송하지 않습니다.</p></div>
       </aside>
     </div>
-    <footer><span>FixLens / 기본 로직 검증</span><span>카메라 영상은 이 기기에서만 표시됩니다.</span></footer>
+    <footer><span>FixLens / AI 물체 인식</span><span>카메라 영상은 이 기기에서만 표시됩니다.</span></footer>
   </main><script type="module" src="./app.mjs"></script>
 </body></html>

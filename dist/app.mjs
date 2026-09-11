@@ -1,129 +1,92 @@
-import {AssemblyEngine} from './engine.mjs';
 import {FrameGate} from './frame-gate.mjs';
-const $ = id => document.getElementById(id);
-const canvas = $('canvas'), ctx = canvas.getContext('2d'), video = $('video');
-const engine = new AssemblyEngine();
-const frameGate = new FrameGate();
-let stream = null, generation = 0;
-let tool = 'target', drag = null;
-let videoSize = '';
-let boxes = {}, lastMessage = '', hidden = document.hidden;
-const labels = {SCAN:'위치 확인', GUIDE:'슬롯으로 이동', ERROR_CHECK:'정상 위치 유지', COMPLETE:'직접 체결 확인'};
-const clamp = (n,min,max) => Math.max(min,Math.min(max,n));
-function reset() { engine.reset(); frameGate.reset(); lastMessage=''; }
-function stopCamera(message = '카메라가 꺼져 있습니다.') {
-  generation++;
-  if(stream) stream.getTracks().forEach(t=>t.stop());
-  stream=null; video.srcObject=null; boxes={}; drag=null;
-  videoSize=''; $('reversed').checked=false; $('hiddenRam').checked=false;
-  $('tools').disabled=true; $('stopCamera').disabled=true; $('startCamera').disabled=false;
-  $('cameraMessage').textContent=message;
-  $('cameraEmpty').hidden=false; $('canvasTag').hidden=true;
-  $('sourceLabel').textContent='연결 대기'; $('emptyTitle').textContent='카메라를 연결하세요';
-  $('stage').style.aspectRatio='16 / 9'; reset();
+import {DetectionState} from './detection-state.mjs';
+const $=id=>document.getElementById(id),video=$('video'),canvas=$('canvas'),ctx=canvas.getContext('2d');
+const capture=document.createElement('canvas'),captureContext=capture.getContext('2d',{willReadFrequently:true});
+const gate=new FrameGate(),detections=new DetectionState();
+let stream=null,generation=0,worker=null,ready=false,loadTimer=null,lastRequest=-Infinity,videoSize='',lastList='';
+const names={person:'사람',bottle:'병',cup:'컵','cell phone':'휴대폰',mouse:'마우스',keyboard:'키보드',laptop:'노트북',book:'책',chair:'의자',scissors:'가위',clock:'시계',remote:'리모컨',tv:'TV',bowl:'그릇',banana:'바나나',apple:'사과',dog:'개',cat:'고양이',backpack:'배낭'};
+function modelMessage(message){$('modelMessage').textContent=message;}
+function clearInput(){gate.reset();detections.clear();ctx.clearRect(0,0,canvas.width,canvas.height);}
+function stopCamera(message='카메라가 꺼져 있습니다.') {
+  generation++;if(stream)stream.getTracks().forEach(t=>t.stop());
+  stream=null;video.srcObject=null;videoSize='';clearInput();
+  $('cameraEmpty').hidden=false;$('canvasTag').hidden=true;$('startCamera').disabled=false;$('stopCamera').disabled=true;
+  $('sourceLabel').textContent='연결 대기';$('emptyTitle').textContent='카메라를 연결하세요';$('cameraMessage').textContent=message;
 }
-async function startCamera() {
-  stopCamera('카메라 접근 권한을 기다리고 있습니다.');
-  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-    $('cameraMessage').textContent='카메라는 HTTPS 주소 또는 이 컴퓨터의 localhost에서 사용할 수 있습니다. HTTPS 주소로 다시 접속하세요.'; return;
-  }
-  const request=++generation; $('startCamera').disabled=true;
-  $('stopCamera').disabled=false; $('emptyTitle').textContent='카메라 권한을 허용해 주세요';
-  $('sourceLabel').textContent='연결 중';
-  try {
-    const acquired = await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:$('facing').value},width:{ideal:1280},height:{ideal:720}}});
-    if(request!==generation) { acquired.getTracks().forEach(t=>t.stop()); return; }
-    stream=acquired; video.srcObject=acquired;
-    await video.play();
-    if(request!==generation) return;
-    $('stage').style.aspectRatio=`${video.videoWidth || 1280} / ${video.videoHeight || 720}`;
-    videoSize=`${video.videoWidth}x${video.videoHeight}`;
-    $('cameraEmpty').hidden=true; $('canvasTag').hidden=false; $('sourceLabel').textContent='실시간 연결됨';
-    $('tools').disabled=false; $('stopCamera').disabled=false; $('startCamera').disabled=false;
-    $('cameraMessage').textContent='① 타겟 슬롯 → ② 다른 슬롯(선택) → ③ RAM 순서로 사각형을 그리세요. RAM 이동 도구나 슬라이더로 위치를 갱신합니다. 실제 부품 움직임은 자동 추적하지 않습니다.';
-    stream.getVideoTracks().forEach(track=>track.addEventListener('ended',()=>{if(request===generation) stopCamera('카메라 연결이 종료되었습니다. 다시 켜주세요.');}));
-    reset();
-  } catch(error) {
-    if(request!==generation) return;
-    const messages={NotAllowedError:'카메라 권한이 차단되었습니다. 브라우저 사이트 권한에서 허용한 뒤 다시 켜주세요.',NotFoundError:'사용할 수 있는 카메라를 찾지 못했습니다. 카메라가 있는 기기에서 접속하거나 웹캠을 연결하세요.',NotReadableError:'카메라를 열 수 없습니다. 다른 앱에서 사용 중인지 확인하세요.'};
-    stopCamera(messages[error.name] || '카메라 연결에 실패했습니다. 권한과 기기 연결을 확인하고 다시 시도하세요.');
-  }
+async function startCamera(){
+  stopCamera('카메라 권한을 허용해 주세요.');
+  if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia){$('cameraMessage').textContent='HTTPS 주소에서 Chrome 또는 Safari로 열고 카메라 권한을 허용하세요.';return;}
+  const request=++generation;$('startCamera').disabled=true;$('stopCamera').disabled=false;$('emptyTitle').textContent='카메라 연결 중';
+  try{
+    const acquired=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:$('facing').value},width:{ideal:1280},height:{ideal:720}}});
+    if(request!==generation){acquired.getTracks().forEach(t=>t.stop());return;}
+    stream=acquired;video.srcObject=acquired;await video.play();if(request!==generation)return;
+    $('cameraEmpty').hidden=true;$('canvasTag').hidden=false;$('startCamera').disabled=false;
+    $('cameraMessage').textContent='병·컵·책 같은 물체를 비추세요. AI가 이 기기에서 자동으로 위치와 종류를 인식합니다.';
+    acquired.getVideoTracks().forEach(t=>t.addEventListener('ended',()=>{if(request===generation)stopCamera('카메라 연결이 종료되었습니다. 다시 연결하세요.');}));
+    clearInput();if(!worker)loadModel();
+  }catch(error){if(request!==generation)return;const messages={NotAllowedError:'카메라 권한이 차단되었습니다. 사이트 권한에서 허용하고 다시 연결하세요.',NotFoundError:'카메라를 찾지 못했습니다. 카메라가 있는 기기나 연결된 웹캠을 사용하세요.',NotReadableError:'다른 앱에서 카메라를 사용 중인지 확인하세요.'};stopCamera(messages[error.name]||'카메라 연결에 실패했습니다. 다시 시도하세요.');}
 }
-function observation() {
-  return {ram:stream && !$('hiddenRam').checked ? boxes.ram : null,target:stream?boxes.target:null,others:boxes.other?[boxes.other]:[],reversed:$('reversed').checked};
+function failModel(message){
+  if(worker)worker.terminate();worker=null;ready=false;clearTimeout(loadTimer);detections.pending=null;detections.clear();
+  modelMessage(message);$('retryModel').hidden=false;$('modelBadge').textContent='연결 필요';
 }
-function rect(box,color,label,dashed=false) {
-  if(!box) return;
-  ctx.save();ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=3;
-  ctx.setLineDash(dashed?[10,7]:[]);ctx.strokeRect(box.x,box.y,box.w,box.h);
-  ctx.globalAlpha=.1;ctx.fillRect(box.x,box.y,box.w,box.h);ctx.globalAlpha=1;
-  ctx.font='20px sans-serif';ctx.fillText(label,box.x,Math.max(28,box.y-12));ctx.restore();
-}
-function render(scene,status) {
-  ctx.clearRect(0,0,1280,720);
-  rect(scene.target,'#b4f786','TARGET');scene.others.forEach(b=>rect(b,'#a5b7c2','OTHER',true));
-  rect(scene.ram,status.warning?'#ff9d83':'#ffd786',scene.reversed?'RAM · REVERSED':'RAM');
-  if(scene.ram && scene.target && status.state!=='COMPLETE') {
-    const x=scene.ram.x+scene.ram.w/2,y=scene.ram.y+scene.ram.h;
-    const tx=scene.target.x+scene.target.w/2,ty=scene.target.y;
-    if(Math.hypot(tx-x,ty-y)>30) {
-      const a=Math.atan2(ty-y,tx-x);ctx.strokeStyle='#b4f786';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(tx,ty);
-      ctx.moveTo(tx-18*Math.cos(a-.4),ty-18*Math.sin(a-.4));ctx.lineTo(tx,ty);ctx.lineTo(tx-18*Math.cos(a+.4),ty-18*Math.sin(a+.4));ctx.stroke();
+function loadModel(){
+  if(worker)worker.terminate();clearTimeout(loadTimer);detections.pending=null;detections.clear();ready=false;
+  $('retryModel').hidden=true;$('modelBadge').textContent='준비 중';modelMessage('AI 모델을 불러오고 있습니다. 첫 실행은 잠시 걸릴 수 있습니다.');
+  try{worker=new Worker('./inference-worker.js');}catch(_){failModel('이 브라우저에서 AI 실행을 시작하지 못했습니다. 다른 최신 브라우저로 열어주세요.');return;}
+  const current=worker;
+  loadTimer=setTimeout(()=>{if(worker===current)failModel('모델 준비 시간이 초과됐습니다. 연결 상태를 확인하고 다시 시도하세요.');},90000);
+  worker.onerror=()=>{if(worker===current)failModel('AI 실행 중 오류가 발생했습니다. 다시 시도하세요.');};
+  worker.onmessage=({data})=>{
+    if(worker!==current)return;
+    if(data.type==='ready'){clearTimeout(loadTimer);ready=true;$('modelBadge').textContent='기기 내 실행';$('backend').textContent=data.backend==='wasm'?'WebAssembly 가속':data.backend==='webgl'?'GPU 가속':'CPU 실행';modelMessage('AI 준비 완료. 카메라 영상에서 일상 물체를 인식합니다.');}
+    else if(data.type==='load-error'||data.type==='inference-error')failModel('AI 실행에 실패했습니다. 카메라는 유지됩니다. 모델을 다시 불러오세요.');
+    else if(data.type==='result'){
+      const now=performance.now();const accepted=detections.accept(data,now);
+      if(!accepted){if(stream&&ready)modelMessage('이전 또는 지연된 결과를 제외했습니다. 물체와 카메라를 잠시 고정하세요.');return;}
+      $('latency').textContent=`${Math.round(data.ms)} ms`;
+      modelMessage(data.ms>800?'인식 속도가 느립니다. 물체와 카메라를 잠시 고정하세요.':'이 기기에서 인식 중입니다. 물체를 움직여 박스가 따라오는지 확인하세요.');
     }
-  }
-  const states=Object.keys(labels),current=states.indexOf(status.state);
-  document.querySelectorAll('#steps li').forEach((li,i)=>{li.classList.toggle('active',i===current);li.classList.toggle('done',i<current);if(i===current)li.setAttribute('aria-current','step');else li.removeAttribute('aria-current');});
-  $('stateLabel').textContent=labels[status.state];
-  if(lastMessage!==status.message){$('message').textContent=status.message;lastMessage=status.message;}
-  $('statusCard').classList.toggle('warning',!!status.warning);
-  $('progress').value=status.progress;
-  $('elapsed').replaceChildren(document.createTextNode((status.elapsed/1000).toFixed(1)),Object.assign(document.createElement('small'),{textContent:'초'}));
-  $('errors').replaceChildren(document.createTextNode(String(status.errors)),Object.assign(document.createElement('small'),{textContent:'회'}));
+  };worker.postMessage({type:'load'});
 }
-function tick(now) {
+function draw(results){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const scale=canvas.width/640;ctx.lineWidth=2.5*scale;ctx.font=`${16*scale}px sans-serif`;
+  for(const p of results){
+    const x=p.x*canvas.width,y=p.y*canvas.height,w=p.w*canvas.width,h=p.h*canvas.height;
+    const label=`${names[p.name]||p.name} ${Math.round(p.score*100)}%`,textW=ctx.measureText(label).width;
+    ctx.strokeStyle='#b4f786';ctx.strokeRect(x,y,w,h);
+    const labelX=Math.max(0,Math.min(x,canvas.width-textW-12*scale)),labelY=Math.max(0,y-28*scale);
+    ctx.fillStyle='#b4f786';ctx.fillRect(labelX,labelY,textW+12*scale,27*scale);ctx.fillStyle='#152413';ctx.fillText(label,labelX+6*scale,labelY+19*scale);
+  }
+  $('count').textContent=String(results.length);
+  const key=JSON.stringify(results.map(p=>[p.name,Math.round(p.score*100)]))+Boolean(stream&&ready);
+  if(key!==lastList){lastList=key;const list=$('objects');list.replaceChildren();
+    if(!results.length){const li=document.createElement('li');li.className='empty-result';li.textContent=stream&&ready?'인식된 물체가 없습니다. 밝은 곳에서 병·컵·책을 비춰보세요.':'카메라와 AI가 준비되면 결과가 표시됩니다.';list.append(li);}
+    for(const p of results){const li=document.createElement('li'),name=document.createElement('span'),score=document.createElement('strong');name.textContent=names[p.name]||p.name;score.textContent=`${Math.round(p.score*100)}%`;li.append(name,score);list.append(li);}
+  }
+}
+function tick(now){
   const size=`${video.videoWidth}x${video.videoHeight}`;
-  if(stream && video.videoWidth && video.videoHeight && size!==videoSize) {
-    videoSize=size; boxes={}; drag=null; reset();
-    $('stage').style.aspectRatio=`${video.videoWidth} / ${video.videoHeight}`;
-    $('cameraMessage').textContent='영상 크기가 바뀌었습니다. 슬롯과 RAM 영역을 다시 지정하세요.';
+  if(stream&&video.videoWidth&&video.videoHeight&&size!==videoSize){videoSize=size;canvas.width=video.videoWidth;canvas.height=video.videoHeight;$('stage').style.aspectRatio=`${canvas.width} / ${canvas.height}`;clearInput();}
+  const frame=gate.sample(video,stream?.getVideoTracks()[0],now);
+  const active=!!stream&&frame.fresh&&!document.hidden;
+  if(!active&&(detections.results.length||detections.pending?.epoch===detections.epoch))detections.clear();
+  if(stream)$('sourceLabel').textContent=active?'실시간 연결됨':'영상 입력 대기';
+  if(detections.pending&&now-detections.pending.capturedAt>20000)failModel('AI 응답 시간이 초과됐습니다. 다시 불러오세요.');
+  if(active&&frame.changed&&ready&&!detections.pending&&now-lastRequest>=120){
+    const ratio=Math.min(1,640/video.videoWidth,480/video.videoHeight);
+    capture.width=Math.max(1,Math.round(video.videoWidth*ratio));capture.height=Math.max(1,Math.round(video.videoHeight*ratio));
+    try{
+      captureContext.drawImage(video,0,0,capture.width,capture.height);
+      const image=captureContext.getImageData(0,0,capture.width,capture.height),job=detections.begin(now,capture.width,capture.height);
+      lastRequest=now;worker.postMessage({type:'detect',...job,pixels:image.data.buffer},[image.data.buffer]);
+    }catch(_){failModel('영상 프레임을 AI에 전달하지 못했습니다. 다시 시도하세요.');}
   }
-  const frame=frameGate.sample(video,stream?.getVideoTracks()[0],now);
-  const scene=observation();
-  if(stream && (!frame.fresh || hidden || drag)) engine.interrupt(drag?'영역 지정 후 위치를 다시 확인합니다.':'영상 입력이 멈췄습니다. 카메라가 재개되면 다시 확인합니다.');
-  const status=(stream && frame.fresh && frame.changed && !hidden && !drag)?engine.update(scene,now):engine.snapshot();
-  if(stream) $('sourceLabel').textContent=frame.fresh && !hidden?'실시간 연결됨':'영상 입력 대기';
-  if(!stream) status.message='카메라를 연결하면 실시간 영상이 표시됩니다.';
-  render(scene,status);requestAnimationFrame(tick);
+  draw(active?detections.visible(now):[]);requestAnimationFrame(tick);
 }
-function point(e){const r=canvas.getBoundingClientRect();return{x:clamp((e.clientX-r.left)/r.width*1280,0,1280),y:clamp((e.clientY-r.top)/r.height*720,0,720)};}
-canvas.addEventListener('pointerdown',e=>{
-  if(!stream)return;
-  if(tool==='move'&&!boxes.ram){$('cameraMessage').textContent='먼저 RAM 영역을 그려주세요.';return;}
-  canvas.setPointerCapture(e.pointerId);drag={start:point(e),original:boxes.ram?{...boxes.ram}:null,before:boxes[tool]?{...boxes[tool]}:null};
-  if(engine.state==='COMPLETE')reset();
-});
-canvas.addEventListener('pointermove',e=>{
-  if(!drag)return;const p=point(e),s=drag.start;
-  if(tool==='move') boxes.ram={...drag.original,x:clamp(drag.original.x+p.x-s.x,0,1280-drag.original.w),y:clamp(drag.original.y+p.y-s.y,0,720-drag.original.h)};
-  else boxes[tool]={x:Math.min(s.x,p.x),y:Math.min(s.y,p.y),w:Math.abs(p.x-s.x),h:Math.abs(p.y-s.y)};
-  syncSliders();
-});
-canvas.addEventListener('pointerup',()=>{
-  if(!drag)return;
-  if(tool!=='move'&&(!boxes[tool]||boxes[tool].w<12||boxes[tool].h<12)){
-    if(drag.before)boxes[tool]=drag.before;else delete boxes[tool];
-    $('cameraMessage').textContent='영역이 너무 작습니다. 부품의 양 끝을 드래그해 다시 지정하세요.';
-  }
-  drag=null;engine.holdAt=null;syncSliders();
-});
-canvas.addEventListener('pointercancel',()=>{if(drag){if(tool==='move')boxes.ram=drag.original;else if(drag.before)boxes[tool]=drag.before;else delete boxes[tool];}drag=null;engine.holdAt=null;});
-function syncSliders(){if(!boxes.ram)return;$('ramX').value=boxes.ram.x/Math.max(1,1280-boxes.ram.w)*100;$('ramY').value=boxes.ram.y/Math.max(1,720-boxes.ram.h)*100;}
-for(const [id,axis,dimension] of [['ramX','x',1280],['ramY','y',720]])$(id).addEventListener('input',()=>{if(!boxes.ram)return;if(engine.state==='COMPLETE')reset();boxes.ram[axis]=Number($(id).value)/100*(dimension-boxes.ram[axis==='x'?'w':'h']);engine.holdAt=null;});
-document.querySelectorAll('[data-tool]').forEach(button=>button.addEventListener('click',()=>{tool=button.dataset.tool;document.querySelectorAll('[data-tool]').forEach(b=>b.setAttribute('aria-pressed',b===button));}));
-$('startCamera').onclick=startCamera;$('stopCamera').onclick=()=>stopCamera();
-$('facing').onchange=()=>{if(stream)startCamera();};
-$('reset').onclick=()=>{reset();};$('clearBoxes').onclick=()=>{boxes={};reset();};
-for(const id of ['reversed','hiddenRam'])$(id).onchange=()=>{if(engine.state==='COMPLETE')reset();engine.holdAt=null;};
-document.addEventListener('visibilitychange',()=>{hidden=document.hidden;frameGate.reset();engine.interrupt();});
-window.addEventListener('pagehide',()=>stopCamera());
+$('startCamera').onclick=startCamera;$('stopCamera').onclick=()=>stopCamera();$('facing').onchange=()=>{if(stream)startCamera();};$('retryModel').onclick=loadModel;
+document.addEventListener('visibilitychange',()=>{clearInput();lastList='';});
+window.addEventListener('pagehide',()=>{stopCamera();if(worker)worker.terminate();worker=null;ready=false;clearTimeout(loadTimer);detections.pending=null;});
 requestAnimationFrame(tick);

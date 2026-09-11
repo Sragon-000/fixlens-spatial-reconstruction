@@ -7,11 +7,12 @@ test('camera permission, video connection, stop, denial and cancelled request', 
   const html=await readFile(new URL('../dist/index.html',import.meta.url),'utf8');
   const elements=new Map([...html.matchAll(/id="([^"]+)"/g)].map(([,id])=>[id,{
     hidden:false,disabled:false,value:'environment',style:{},textContent:'',
-    addEventListener(){},getContext(){return{};}
+    addEventListener(){},getContext(){return{clearRect(){}};}
   }]));
-  globalThis.document={hidden:false,getElementById:id=>{assert.ok(elements.has(id),id);return elements.get(id);},querySelectorAll:()=>[],addEventListener(){}};
+  globalThis.document={hidden:false,getElementById:id=>{assert.ok(elements.has(id),id);return elements.get(id);},querySelectorAll:()=>[],createElement:()=>({getContext:()=>({})}),addEventListener(){}};
   globalThis.window={isSecureContext:true,addEventListener(){}};
   globalThis.requestAnimationFrame=()=>{};
+  globalThis.Worker=class {postMessage(){this.onmessage({data:{type:'ready',backend:'cpu'}});}terminate(){}};
   const video=elements.get('video');video.videoWidth=1280;video.videoHeight=720;
   video.play=async()=>{video.paused=false;};
   let stopped=0,requested;
@@ -25,9 +26,9 @@ test('camera permission, video connection, stop, denial and cancelled request', 
   assert.equal(video.srcObject,stream);assert.equal(requested.audio,false);
   assert.equal(requested.video.facingMode.ideal,'environment');
   assert.equal(elements.get('cameraEmpty').hidden,true);
-  assert.equal(elements.get('tools').disabled,false);
+
   stop.onclick();assert.equal(stopped,1);assert.equal(video.srcObject,null);
-  assert.equal(elements.get('cameraEmpty').hidden,false);assert.equal(elements.get('tools').disabled,true);
+  assert.equal(elements.get('cameraEmpty').hidden,false);
   mediaDevices.getUserMedia=async()=>{throw Object.assign(new Error(),{name:'NotAllowedError'});};
   await start.onclick();assert.match(elements.get('cameraMessage').textContent,/권한이 차단/);assert.equal(start.disabled,false);
   let resolve;

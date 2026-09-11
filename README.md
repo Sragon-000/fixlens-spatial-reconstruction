@@ -1,13 +1,15 @@
-# FixLens web prototype
+# FixLens on-device AI camera
 
-Static browser application. Serve `dist/` over HTTPS for phone camera access, or localhost for desktop development. No dependencies, video uploads, inference API, or persistence.
+The browser captures its own camera. COCO-SSD / lite_mobilenet_v2 performs actual object detection inside a dedicated Web Worker on that device. No frame upload or inference server exists. The public static files include pinned TensorFlow.js 4.22.0, COCO-SSD 2.2.3, WASM binaries and all model weights (about 22 MB total). An initial network download is required; offline availability is not promised.
 
-Run engine regressions with `node --test tests/*.test.mjs`.
+WASM is preferred, then WebGL, then CPU. No cross-origin isolation is required for single-thread WASM. Camera preview remains on the UI thread. Model inputs are reduced to at most 640×480 while preserving aspect ratio; output boxes are normalized and mapped back to actual video dimensions.
 
-The camera view uses manually entered rectangles and orientation. These do not track real parts. The 500ms completion timer confirms only manually entered geometry, never physical insertion. Fixed thresholds use a 1280×720 reference plane. Camera switching, permission errors, stream termination and page exit release/reset input.
+Only one inference may run at a time. Results older than 2 seconds or from a previous camera/visibility/size session are discarded. Boxes expire 650ms after the last accepted result, and disappear immediately on an empty detection result or camera interruption. This version repeatedly detects objects; it does not implement persistent object IDs, RAM orientation, assembly classification or physical insertion checks.
 
-The default screen connects the device camera after a user gesture and permission grant. No demo controls or generated observations are included in the published assets.
+Serve dist/ over HTTPS for phone camera access, or localhost for desktop development.
 
-The engine is a duration-based port of the Python prototype rules. Only live camera with manual position input is exposed. Synthetic observations exist only in test fixtures; future local or remote detectors can supply `{ram, target, others, reversed}` with fresh timestamps. No server inference is implemented in this version.
+- Regression tests: node --test tests/*.test.mjs
+- Actual model and shipped worker smoke test: node tests/model-smoke.mjs
+- Optional reference image input: node tests/model-smoke.mjs PATH_TO_RGBA WIDTH HEIGHT
 
-Camera processing is gated on advancing video.currentTime, readyState, live track state and mute state. A pause, hidden page or >250ms without new video frames interrupts pending completion. Video dimension changes clear manual boxes to prevent misaligned coordinates. This does not extract objects from video pixels. See REVIEW.md for the current review scope.
+No browser or phone hardware benchmark is claimed. See REVIEW.md and THIRD_PARTY.md.
