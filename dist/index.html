@@ -8,21 +8,21 @@
 <body>
   <header><a class="brand" href="./"><span class="logo" aria-hidden="true">⌗</span> FixLens</a><span class="version">RAM 조립 가이드 <b>PROTOTYPE</b></span></header>
   <main>
-    <section class="intro"><div><span class="eyebrow">ASSEMBLY WORKSPACE</span><h1>보고, 맞추고, 확인하세요.</h1></div><p>자동 인식 전 단계입니다.<br>데모 또는 직접 지정한 위치로 안내를 검증합니다.</p></section>
+    <section class="intro"><div><span class="eyebrow">ASSEMBLY WORKSPACE</span><h1>보고, 맞추고, 확인하세요.</h1></div><p>자동 인식 전 단계입니다.<br>실시간 카메라 영상에 부품 위치를 직접 지정하세요.</p></section>
     <div class="workspace">
       <section class="viewer-panel" aria-label="카메라 및 위치 지정">
-        <div class="viewer-toolbar"><div class="segmented" aria-label="입력 선택"><button id="demoMode" aria-pressed="true">데모</button><button id="cameraMode" aria-pressed="false">내 카메라</button></div><span id="sourceLabel">시뮬레이션 입력</span></div>
-        <div id="stage" class="stage"><video id="video" muted playsinline></video><canvas id="canvas" width="1280" height="720" aria-label="위치 지정 화면. 선택한 영역을 드래그하여 그리세요."></canvas><span id="canvasTag" class="canvas-tag">DEMO / 합성 위치</span></div>
+        <div class="viewer-toolbar"><strong>내 카메라</strong><span id="sourceLabel">연결 대기</span></div>
+        <div id="stage" class="stage"><video id="video" autoplay muted playsinline></video><canvas id="canvas" width="1280" height="720" aria-label="실시간 카메라 위에서 선택한 부품 영역을 드래그하여 지정하세요."></canvas><span id="canvasTag" class="canvas-tag" hidden>실시간 영상 · 수동 위치 지정</span><div id="cameraEmpty" class="camera-empty"><strong id="emptyTitle">카메라를 연결하세요</strong><p>휴대폰 후면 카메라 또는 연결된 웹캠의<br>실시간 영상을 사용합니다.</p><button id="startCamera" class="primary">카메라 연결</button></div></div>
         <div class="legend"><span><i class="target"></i>타겟 슬롯</span><span><i class="ram"></i>RAM</span><span><i class="other"></i>다른 슬롯</span></div>
-        <div id="cameraControls" hidden>
-          <div class="camera-actions"><button id="startCamera" class="primary">카메라 켜기</button><button id="stopCamera" disabled>카메라 끄기</button><select id="facing" aria-label="카메라 방향"><option value="environment">후면 카메라</option><option value="user">전면 카메라</option></select></div>
+        <div id="cameraControls">
+          <div class="camera-actions"><button id="stopCamera" disabled>카메라 끄기</button><select id="facing" aria-label="카메라 방향"><option value="environment">후면 카메라</option><option value="user">전면 카메라</option></select></div>
           <p id="cameraMessage" role="status">카메라를 켠 후 슬롯과 RAM 영역을 직접 지정하세요. 영상은 서버로 전송되지 않습니다.</p>
           <fieldset id="tools" disabled><legend>화면에서 드래그해 영역 지정</legend><div class="tool-buttons"><button data-tool="target" aria-pressed="true">① 타겟 슬롯</button><button data-tool="other" aria-pressed="false">② 다른 슬롯</button><button data-tool="ram" aria-pressed="false">③ RAM</button><button data-tool="move" aria-pressed="false">RAM 이동</button></div>
           <div class="toggles"><label><input id="reversed" type="checkbox"> RAM 역방향</label><label><input id="hiddenRam" type="checkbox"> RAM 가림</label></div>
           <label class="slider-label">RAM 좌우 위치<input id="ramX" type="range" min="0" max="100" value="50"></label><label class="slider-label">RAM 상하 위치<input id="ramY" type="range" min="0" max="100" value="50"></label>
           <button id="clearBoxes">영역 다시 지정</button></fieldset>
         </div>
-        <div id="demoControls"><label for="scenario">테스트 시나리오</label><div class="demo-actions"><select id="scenario"><option value="normal">01 · 정상 위치로 이동</option><option value="reversed">02 · RAM 역방향 접근</option><option value="wrong">03 · 다른 슬롯으로 접근</option></select><button id="pause">일시정지</button></div><p>자동으로 움직이는 RAM으로 정상 흐름과 오류 경고를 확인하세요.</p></div>
+
       </section>
       <aside class="guide-panel">
         <div class="panel-heading"><span class="eyebrow">LIVE GUIDE</span><button id="reset" class="text-button">작업 초기화 ↺</button></div>

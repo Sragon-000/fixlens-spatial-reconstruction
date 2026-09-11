@@ -12,6 +12,11 @@ export class AssemblyEngine {
     this.startedAt = null; this.elapsed = 0; this.progress = 0;
     this.message = 'RAM과 타겟 슬롯의 위치를 확인하세요.';
   }
+  interrupt(message = '새 카메라 입력을 기다리고 있습니다.') {
+    this.state = 'SCAN'; this.warning = ''; this.progress = 0;
+    this.scanAt = null; this.holdAt = null; this.lastAt = null;
+    this.message = message;
+  }
   update({ram, target, others = [], reversed = false}, now) {
     if (this.startedAt === null) this.startedAt = now;
     if (this.state === 'COMPLETE') return this.snapshot();
@@ -56,14 +61,4 @@ export class AssemblyEngine {
     return this.snapshot();
   }
   snapshot() { return {state: this.state, warning: this.warning, errors: this.errors, elapsed: this.elapsed, progress: this.progress, message: this.message}; }
-}
-
-export function demoScene(scenario, milliseconds) {
-  const phase = (milliseconds % 5000) / 5000;
-  const target = {x: 390, y: 460, w: 300, h: 46};
-  const other = {x: 830, y: 460, w: 300, h: 46};
-  const destination = scenario === 'wrong' ? other : target;
-  const progress = Math.max(0, Math.min(1, (phase - .25) / .45));
-  const ram = {x: destination.x + 10, y: 130 + progress * (destination.y - 130), w: 280, h: 42};
-  return {ram, target, others: [other], reversed: scenario === 'reversed'};
 }

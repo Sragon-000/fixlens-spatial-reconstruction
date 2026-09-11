@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {AssemblyEngine,demoScene} from '../dist/engine.mjs';
+import {AssemblyEngine} from '../dist/engine.mjs';
+import {demoScene} from './fixtures.mjs';
 const correct={ram:{x:100,y:300,w:100,h:40},target:{x:100,y:300,w:100,h:40},others:[],reversed:false};
 test('three scenarios at different observation rates',()=>{
   for(const fps of [15,30,60])for(const scenario of ['normal','reversed','wrong']){
