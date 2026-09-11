@@ -32,6 +32,9 @@ try{
     assert.equal(messages[2]?.type,'result',JSON.stringify(messages[2]));
     assert.ok(messages[2].results.length>0,'Expected actual objects in the reference image');
     console.log('Reference image:',JSON.stringify(messages[2].results));
+    await context.onmessage({data:{type:'detect',detail:true,id:3,width:Number(process.argv[3]),height:Number(process.argv[4]),pixels:pixels.buffer}});
+    assert.equal(messages[3]?.type,'result',JSON.stringify(messages[3]));
+    console.log('Detail comparison:',JSON.stringify({full:messages[2].results.length,detail:messages[3].results.length,fullMs:Math.round(messages[2].ms),detailMs:Math.round(messages[3].ms)}));
   }
   console.log(JSON.stringify({actualModel:'COCO-SSD lite_mobilenet_v2',backend:messages[0].backend,inferenceMs:Math.round(messages[1].ms),detections:messages[1].results.length}));
 }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}

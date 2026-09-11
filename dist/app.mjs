@@ -22,7 +22,7 @@ async function startCamera(){
     if(request!==generation){acquired.getTracks().forEach(t=>t.stop());return;}
     stream=acquired;video.srcObject=acquired;await video.play();if(request!==generation)return;
     $('cameraEmpty').hidden=true;$('canvasTag').hidden=false;$('startCamera').disabled=false;
-    $('cameraMessage').textContent='병·컵·책 같은 물체를 비추세요. AI가 이 기기에서 자동으로 위치와 종류를 인식합니다.';
+    $('cameraMessage').textContent='화면 전체에서 학습된 물체를 최대 50개까지 찾습니다. 작은 물체 보강은 더 오래 걸릴 수 있습니다.';
     acquired.getVideoTracks().forEach(t=>t.addEventListener('ended',()=>{if(request===generation)stopCamera('카메라 연결이 종료되었습니다. 다시 연결하세요.');}));
     clearInput();if(!worker)loadModel();
   }catch(error){if(request!==generation)return;const messages={NotAllowedError:'카메라 권한이 차단되었습니다. 사이트 권한에서 허용하고 다시 연결하세요.',NotFoundError:'카메라를 찾지 못했습니다. 카메라가 있는 기기나 연결된 웹캠을 사용하세요.',NotReadableError:'다른 앱에서 카메라를 사용 중인지 확인하세요.'};stopCamera(messages[error.name]||'카메라 연결에 실패했습니다. 다시 시도하세요.');}
@@ -55,16 +55,16 @@ function draw(results){
   const scale=canvas.width/640;ctx.lineWidth=2.5*scale;ctx.font=`${16*scale}px sans-serif`;
   for(const p of results){
     const x=p.x*canvas.width,y=p.y*canvas.height,w=p.w*canvas.width,h=p.h*canvas.height;
-    const label=`${names[p.name]||p.name} ${Math.round(p.score*100)}%`,textW=ctx.measureText(label).width;
-    ctx.strokeStyle='#b4f786';ctx.strokeRect(x,y,w,h);
+    const label=`${names[p.name]||p.name} ${Math.round(p.score*100)}%${p.held?' · 재확인':''}`,textW=ctx.measureText(label).width;
+    ctx.setLineDash(p.held?[6*scale,4*scale]:[]);ctx.strokeStyle='#b4f786';ctx.strokeRect(x,y,w,h);
     const labelX=Math.max(0,Math.min(x,canvas.width-textW-12*scale)),labelY=Math.max(0,y-28*scale);
     ctx.fillStyle='#b4f786';ctx.fillRect(labelX,labelY,textW+12*scale,27*scale);ctx.fillStyle='#152413';ctx.fillText(label,labelX+6*scale,labelY+19*scale);
   }
   $('count').textContent=String(results.length);
-  const key=JSON.stringify(results.map(p=>[p.name,Math.round(p.score*100)]))+Boolean(stream&&ready);
+  const key=JSON.stringify(results.map(p=>[p.name,Math.round(p.score*100),p.held]))+Boolean(stream&&ready);
   if(key!==lastList){lastList=key;const list=$('objects');list.replaceChildren();
     if(!results.length){const li=document.createElement('li');li.className='empty-result';li.textContent=stream&&ready?'인식된 물체가 없습니다. 밝은 곳에서 병·컵·책을 비춰보세요.':'카메라와 AI가 준비되면 결과가 표시됩니다.';list.append(li);}
-    for(const p of results){const li=document.createElement('li'),name=document.createElement('span'),score=document.createElement('strong');name.textContent=names[p.name]||p.name;score.textContent=`${Math.round(p.score*100)}%`;li.append(name,score);list.append(li);}
+    for(const p of results){const li=document.createElement('li'),name=document.createElement('span'),score=document.createElement('strong');name.textContent=names[p.name]||p.name;score.textContent=p.held?'재확인':`${Math.round(p.score*100)}%`;li.append(name,score);list.append(li);}
   }
 }
 function tick(now){
@@ -76,17 +76,17 @@ function tick(now){
   if(stream)$('sourceLabel').textContent=active?'실시간 연결됨':'영상 입력 대기';
   if(detections.pending&&now-detections.pending.capturedAt>20000)failModel('AI 응답 시간이 초과됐습니다. 다시 불러오세요.');
   if(active&&frame.changed&&ready&&!detections.pending&&now-lastRequest>=120){
-    const ratio=Math.min(1,640/video.videoWidth,480/video.videoHeight);
+    const ratio=Math.min(1,960/video.videoWidth,720/video.videoHeight);
     capture.width=Math.max(1,Math.round(video.videoWidth*ratio));capture.height=Math.max(1,Math.round(video.videoHeight*ratio));
     try{
       captureContext.drawImage(video,0,0,capture.width,capture.height);
       const image=captureContext.getImageData(0,0,capture.width,capture.height),job=detections.begin(now,capture.width,capture.height);
-      lastRequest=now;worker.postMessage({type:'detect',...job,pixels:image.data.buffer},[image.data.buffer]);
+      lastRequest=now;worker.postMessage({type:'detect',...job,detail:$('detail').checked,pixels:image.data.buffer},[image.data.buffer]);
     }catch(_){failModel('영상 프레임을 AI에 전달하지 못했습니다. 다시 시도하세요.');}
   }
   draw(active?detections.visible(now):[]);requestAnimationFrame(tick);
 }
-$('startCamera').onclick=startCamera;$('stopCamera').onclick=()=>stopCamera();$('facing').onchange=()=>{if(stream)startCamera();};$('retryModel').onclick=loadModel;
+$('startCamera').onclick=startCamera;$('stopCamera').onclick=()=>stopCamera();$('facing').onchange=()=>{if(stream)startCamera();};$('retryModel').onclick=loadModel;$('detail').onchange=()=>clearInput();
 document.addEventListener('visibilitychange',()=>{clearInput();lastList='';});
 window.addEventListener('pagehide',()=>{stopCamera();if(worker)worker.terminate();worker=null;ready=false;clearTimeout(loadTimer);detections.pending=null;});
 requestAnimationFrame(tick);

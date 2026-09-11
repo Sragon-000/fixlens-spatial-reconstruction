@@ -21,3 +21,19 @@ test('stale results, empty results and malformed boxes never linger',()=>{
   assert.equal(d.visible(2300).length,1);
   job=d.begin(2400,640,480);d.accept({id:job.id,results:[]},2500);assert.equal(d.visible(2500).length,0);
 });
+test('brief partial misses are bounded and never held after an empty result',()=>{
+  const d=new DetectionState(),other={...box,bbox:[400,48,100,96]};
+  let job=d.begin(0,640,480);d.accept({id:job.id,results:[box,other]},100);
+  job=d.begin(110,640,480);d.accept({id:job.id,results:[box]},150);
+  assert.equal(d.visible(150).length,2);assert.equal(d.visible(150).filter(p=>p.held).length,1);
+  assert.equal(d.visible(351).length,1);
+  job=d.begin(360,640,480);d.accept({id:job.id,results:[]},400);assert.equal(d.visible(400).length,0);
+});
+test('same-class neighbors match one-to-one and gentle movement is smoothed',()=>{
+  const d=new DetectionState(),other={...box,bbox:[400,48,100,96]};
+  let job=d.begin(0,640,480);d.accept({id:job.id,results:[box,other]},100);
+  job=d.begin(110,640,480);d.accept({id:job.id,results:[{...other,bbox:[410,48,100,96]},{...box,bbox:[74,48,128,96]}]},150);
+  assert.equal(d.results.length,2);
+  assert.ok(d.results[0].x>400/640&&d.results[0].x<410/640);
+  assert.ok(d.results[1].x>64/640&&d.results[1].x<74/640);
+});

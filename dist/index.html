@@ -14,8 +14,8 @@
         <div class="viewer-toolbar"><strong>내 카메라</strong><span id="sourceLabel">연결 대기</span></div>
         <div id="stage" class="stage"><video id="video" autoplay muted playsinline></video><canvas id="canvas" width="1280" height="720" aria-label="AI가 검출한 물체 위치와 신뢰도"></canvas><span id="canvasTag" class="canvas-tag" hidden>실시간 영상 · 기기 내 AI</span><div id="cameraEmpty" class="camera-empty"><strong id="emptyTitle">카메라를 연결하세요</strong><p>휴대폰 후면 카메라 또는 연결된 웹캠의<br>실시간 영상을 사용합니다.</p><button id="startCamera" class="primary">카메라 연결</button></div></div>
         <div id="cameraControls">
-          <div class="camera-actions"><button id="stopCamera" disabled>카메라 끄기</button><select id="facing" aria-label="카메라 방향"><option value="environment">후면 카메라</option><option value="user">전면 카메라</option></select></div>
-          <p id="cameraMessage" role="status">카메라 연결 후 AI가 자동으로 시작됩니다. 병·컵·책을 비춰보세요.</p>
+          <div class="camera-actions"><button id="stopCamera" disabled>카메라 끄기</button><select id="facing" aria-label="카메라 방향"><option value="environment">후면 카메라</option><option value="user">전면 카메라</option></select></div><label class="detail-option"><input id="detail" type="checkbox" checked> 작은 물체까지 찾기 <small>화면을 나누어 추가 확인 · 속도는 느려질 수 있습니다</small></label>
+          <p id="cameraMessage" role="status">카메라 연결 후 AI가 화면 전체에서 물체를 자동으로 찾습니다.</p>
         </div>
 
       </section>
@@ -24,7 +24,7 @@
         <div class="status-card model-card"><strong>이 기기에서 인식</strong><p id="modelMessage" role="status" aria-live="polite">카메라를 연결하면 AI 모델을 준비합니다.</p><button id="retryModel" hidden>AI 다시 불러오기</button></div>
         <div class="metrics"><div><span>인식된 물체</span><strong id="count">0</strong></div><div><span>최근 추론 시간</span><strong id="latency" class="latency">—</strong></div></div>
         <h2 class="results-title">인식 결과</h2><ul id="objects" class="objects"><li class="empty-result">카메라와 AI가 준비되면 결과가 표시됩니다.</li></ul>
-        <div class="scope-note"><strong>병 · 컵 · 책 · 휴대폰</strong><p>일상 물체 80종을 학습한 경량 모델을 사용합니다. 모든 물체를 인식하지는 않으며, RAM이나 장착 상태는 판정하지 않습니다.</p><p>COCO-SSD · MobileNet V2 Lite<br><span id="backend">실행 대기</span> · 신뢰도 50% 이상 표시</p><p>첫 실행에는 모델 다운로드가 필요합니다. 촬영 영상은 서버로 전송하지 않습니다.</p></div>
+        <div class="scope-note"><strong>화면 전체의 물체 인식</strong><p>일상 물체 80종을 학습한 경량 모델을 사용합니다. 신뢰도 기준을 낮춰 더 많이 찾지만 오인식도 늘 수 있습니다. 모든 물체를 인식하지는 않으며, RAM이나 장착 상태는 판정하지 않습니다.</p><p>COCO-SSD · MobileNet V2 Lite<br><span id="backend">실행 대기</span> · 신뢰도 35% 이상 · 최대 50개 표시</p><p>첫 실행에는 모델 다운로드가 필요합니다. 촬영 영상은 서버로 전송하지 않습니다.</p></div>
       </aside>
     </div>
     <footer><span>FixLens / AI 물체 인식</span><span>카메라 영상은 이 기기에서만 표시됩니다.</span></footer>
