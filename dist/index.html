@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101718"><meta name="description" content="카메라와 수동 영역 지정으로 RAM 조립 안내를 검증하는 FixLens 프로토타입">
+  <title>FixLens · 카메라 조립 가이드</title><link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <header><a class="brand" href="./"><span class="logo" aria-hidden="true">⌗</span> FixLens</a><span class="version">RAM 조립 가이드 <b>PROTOTYPE</b></span></header>
+  <main>
+    <section class="intro"><div><span class="eyebrow">ASSEMBLY WORKSPACE</span><h1>보고, 맞추고, 확인하세요.</h1></div><p>자동 인식 전 단계입니다.<br>데모 또는 직접 지정한 위치로 안내를 검증합니다.</p></section>
+    <div class="workspace">
+      <section class="viewer-panel" aria-label="카메라 및 위치 지정">
+        <div class="viewer-toolbar"><div class="segmented" aria-label="입력 선택"><button id="demoMode" aria-pressed="true">데모</button><button id="cameraMode" aria-pressed="false">내 카메라</button></div><span id="sourceLabel">시뮬레이션 입력</span></div>
+        <div id="stage" class="stage"><video id="video" muted playsinline></video><canvas id="canvas" width="1280" height="720" aria-label="위치 지정 화면. 선택한 영역을 드래그하여 그리세요."></canvas><span id="canvasTag" class="canvas-tag">DEMO / 합성 위치</span></div>
+        <div class="legend"><span><i class="target"></i>타겟 슬롯</span><span><i class="ram"></i>RAM</span><span><i class="other"></i>다른 슬롯</span></div>
+        <div id="cameraControls" hidden>
+          <div class="camera-actions"><button id="startCamera" class="primary">카메라 켜기</button><button id="stopCamera" disabled>카메라 끄기</button><select id="facing" aria-label="카메라 방향"><option value="environment">후면 카메라</option><option value="user">전면 카메라</option></select></div>
+          <p id="cameraMessage" role="status">카메라를 켠 후 슬롯과 RAM 영역을 직접 지정하세요. 영상은 서버로 전송되지 않습니다.</p>
+          <fieldset id="tools" disabled><legend>화면에서 드래그해 영역 지정</legend><div class="tool-buttons"><button data-tool="target" aria-pressed="true">① 타겟 슬롯</button><button data-tool="other" aria-pressed="false">② 다른 슬롯</button><button data-tool="ram" aria-pressed="false">③ RAM</button><button data-tool="move" aria-pressed="false">RAM 이동</button></div>
+          <div class="toggles"><label><input id="reversed" type="checkbox"> RAM 역방향</label><label><input id="hiddenRam" type="checkbox"> RAM 가림</label></div>
+          <label class="slider-label">RAM 좌우 위치<input id="ramX" type="range" min="0" max="100" value="50"></label><label class="slider-label">RAM 상하 위치<input id="ramY" type="range" min="0" max="100" value="50"></label>
+          <button id="clearBoxes">영역 다시 지정</button></fieldset>
+        </div>
+        <div id="demoControls"><label for="scenario">테스트 시나리오</label><div class="demo-actions"><select id="scenario"><option value="normal">01 · 정상 위치로 이동</option><option value="reversed">02 · RAM 역방향 접근</option><option value="wrong">03 · 다른 슬롯으로 접근</option></select><button id="pause">일시정지</button></div><p>자동으로 움직이는 RAM으로 정상 흐름과 오류 경고를 확인하세요.</p></div>
+      </section>
+      <aside class="guide-panel">
+        <div class="panel-heading"><span class="eyebrow">LIVE GUIDE</span><button id="reset" class="text-button">작업 초기화 ↺</button></div>
+        <ol id="steps" class="steps"><li data-state="SCAN"><span>01</span><div><strong>위치 확인</strong><small>RAM과 슬롯 입력</small></div></li><li data-state="GUIDE"><span>02</span><div><strong>슬롯으로 이동</strong><small>위치와 방향 정렬</small></div></li><li data-state="ERROR_CHECK"><span>03</span><div><strong>정상 위치 유지</strong><small>0.5초 연속 확인</small></div></li><li data-state="COMPLETE"><span>04</span><div><strong>직접 체결 확인</strong><small>양쪽 걸쇠 확인</small></div></li></ol>
+        <div id="statusCard" class="status-card"><span id="stateLabel">위치 확인</span><p id="message" role="status" aria-live="polite">RAM과 타겟 슬롯의 위치를 확인하세요.</p><progress id="progress" max="1" value="0" aria-label="정상 위치 유지 진행률"></progress></div>
+        <div class="metrics"><div><span>작업 시간</span><strong id="elapsed">0.0<small>초</small></strong></div><div><span>오류 발생</span><strong id="errors">0<small>회</small></strong></div></div>
+        <div class="scope-note"><strong>지금 확인할 수 있는 것</strong><p>입력한 위치의 정렬, 방향 오류, 오슬롯 접근과 복구 흐름을 확인합니다. 실제 RAM 추적이나 체결 상태를 자동으로 인식하지 않습니다.</p></div>
+      </aside>
+    </div>
+    <footer><span>FixLens / 기본 로직 검증</span><span>카메라 영상은 이 기기에서만 표시됩니다.</span></footer>
+  </main><script type="module" src="./app.mjs"></script>
+</body></html>
