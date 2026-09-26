@@ -4,14 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f3efe4">
-  <meta name="description" content="카메라 화면에서 물체를 실시간 감지하고 공간 배치를 살펴보는 FixLens">
-  <title>FixLens · 공간 재구성</title>
+  <meta name="description" content="고정 카메라로 공간을 스캔하고 원하는 스타일로 정리하도록 돕는 FixLens">
+  <title>FixLens · 공간 정리 안내</title>
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="./" aria-label="FixLens"><span class="logo" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M6 27V6h20v21M6 14h20M6 21h20M16 14v7"/><circle cx="22" cy="10" r="2"/></svg></span><span>FixLens</span></a>
-    <span class="product-label">공간 재구성</span>
+    <span class="product-label">공간 정리</span>
     <label class="zone-field"><span class="zone-mark" aria-hidden="true">⌂</span><span class="visually-hidden">공간 이름</span><input id="zoneName" maxlength="40" value="책상 위" aria-label="공간 이름"></label>
   </header>
   <main class="camera-layout">
@@ -24,11 +24,16 @@
         <button id="startCamera" class="primary start-button" type="button">카메라 켜기</button>
         <p id="cameraMessage" class="camera-message">보이는 장면에서 물건 배치를 추정합니다.</p>
       </div>
-      <p class="privacy-note">윤곽 감지는 기기에서 실행 · AI 이름 보완용 장면은 Mac 서버로 전송</p>
+      <p id="privacyNote" class="privacy-note">실시간 물체 감지는 기기에서 실행 · AI 이름 보완용 장면은 Mac 서버로 전송</p>
       <div id="scanToast" class="scan-toast" role="status" aria-live="polite" hidden></div>
+      <div id="scanProgress" class="scan-progress" hidden>
+        <div class="scan-progress-copy"><strong id="scanProgressTitle">책상 스캔 중</strong><span id="scanProgressValue">0%</span></div>
+        <div class="scan-progress-track"><span id="scanProgressBar"></span></div>
+        <p id="scanProgressHint">카메라를 고정하고 물체가 보이도록 해주세요.</p>
+      </div>
       <div class="camera-toolbar">
         <button id="stopCamera" class="icon-button" type="button" disabled aria-label="카메라 끄기" title="카메라 끄기">끄기</button>
-        <button id="scanButton" class="scan-button" type="button" disabled aria-pressed="false"><span class="memory-mark" aria-hidden="true">⌖</span><span>실시간 감지 시작</span></button>
+        <button id="scanButton" class="scan-button" type="button" disabled aria-pressed="false"><span class="memory-mark" aria-hidden="true">⌖</span><span>공간 스캔 시작</span></button>
         <select id="facing" class="facing-select" aria-label="카메라 방향"><option value="environment">후면</option><option value="user">전면</option></select>
       </div>
     </section>
@@ -39,14 +44,35 @@
       </button>
       <div id="drawerBody" class="drawer-body" hidden>
         <section id="candidateSection" class="drawer-section">
-          <p class="section-title">공간 요소 <span id="candidateCount">0</span></p>
+          <p class="section-title">인식한 물건 <span id="candidateCount">0</span></p>
+          <p id="scanSummary" class="panel-copy">책상 전체가 보이게 카메라를 고정하고 스캔을 시작해요.</p>
           <ul id="candidates" class="objects"><li class="empty-result">카메라에 물체를 비추면 윤곽을 표시해요.</li></ul>
-          <button id="createLayoutButton" class="primary wide" type="button" disabled>2D 배치도 만들기</button>
+          <button id="continueStyleButton" class="primary wide" type="button" disabled>정리 스타일 고르기</button>
         </section>
-        <section id="layoutSection" class="drawer-section" hidden>
-          <div id="layoutCanvas" class="layout-canvas" role="img" aria-label="현재 카메라 장면의 2D 배치도"></div>
-          <p class="layout-caption">현재 화면에서 추정한 2D 배치 초안 · 깊이와 3D 구조는 포함하지 않아요.</p>
-          <button id="rescanButton" class="quiet-button" type="button">다른 장면 다시 담기</button>
+        <section id="styleSection" class="drawer-section" hidden>
+          <p class="section-title">원하는 정리 스타일</p>
+          <div class="style-options" role="group" aria-label="정리 스타일 선택">
+            <button class="style-option selected" type="button" data-style="minimal" aria-pressed="true"><strong>미니멀</strong><span>물건을 가장자리로 모아 여백 만들기</span></button>
+            <button class="style-option" type="button" data-style="focus" aria-pressed="false"><strong>작업 효율</strong><span>작업 공간을 비우고 주변으로 정돈</span></button>
+            <button class="style-option" type="button" data-style="cozy" aria-pressed="false"><strong>아늑하게</strong><span>비슷한 물건끼리 보기 좋게 모으기</span></button>
+          </div>
+          <button id="makePlanButton" class="primary wide" type="button">이 스타일로 배치안 만들기</button>
+        </section>
+        <section id="planSection" class="drawer-section" hidden>
+          <p id="planTitle" class="section-title">정리 배치안</p>
+          <p id="planCopy" class="panel-copy"></p>
+          <ol id="planSteps" class="plan-steps"></ol>
+          <button id="startGuideButton" class="primary wide" type="button">이 순서로 정리 시작</button>
+          <button id="editStyleButton" class="quiet-button" type="button">스타일 다시 고르기</button>
+        </section>
+        <section id="guideSection" class="drawer-section" hidden>
+          <p id="guideStepCount" class="section-title">1 / 1</p>
+          <h2 id="guideObjectName" class="guide-object-name">물건</h2>
+          <p id="guideInstruction" class="panel-copy"></p>
+          <div id="moveStatus" class="move-status" role="status">이동을 감지하는 중이에요.</div>
+          <button id="confirmMoveButton" class="primary wide" type="button">이동 완료 확인</button>
+          <button id="skipMoveButton" class="quiet-button" type="button">이 물건 건너뛰기</button>
+          <button id="finishGuideButton" class="primary wide" type="button" hidden>정리 완료</button>
         </section>
       </div>
     </section>
