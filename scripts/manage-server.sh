@@ -76,6 +76,19 @@ start_ollama() {
 
 start_web() {
   if service_responds "$WEB_URL/api/health"; then
+    local pid command process_cwd
+    if command -v lsof >/dev/null 2>&1; then
+      while IFS= read -r pid; do
+        [[ "$pid" =~ ^[0-9]+$ ]] || continue
+        command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+        process_cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+        if [[ "$process_cwd" == "$ROOT" && "$command" == *"server/local.mjs"* ]]; then
+          printf '%s\n' "$pid" >"$WEB_PID"
+          printf '이미 실행 중인 FixLens 웹 서버를 관리 메뉴에 연결했습니다.\n'
+          return 0
+        fi
+      done < <(lsof -tiTCP:4173 -sTCP:LISTEN 2>/dev/null)
+    fi
     printf 'FixLens 웹 서버가 이미 실행 중입니다.\n'
     return 0
   fi
@@ -85,7 +98,7 @@ start_web() {
     printf 'Node.js를 찾지 못했습니다. Node.js 20 이상을 설치하세요.\n'
     return 1
   fi
-  if managed_pid_matches "$WEB_PID" "$ROOT/server/local.mjs"; then
+  if managed_pid_matches "$WEB_PID" 'server/local.mjs'; then
     printf 'FixLens 웹 서버가 시작되는 중입니다.\n'
   else
     start_process 'FixLens 웹 서버' "$WEB_PID" "$RUN_DIR/web.log" "$node_bin" "$ROOT/server/local.mjs"
@@ -177,7 +190,7 @@ case "${1:-status}" in
   start) start_all ;;
   stop)
     stop_process 'HTTPS 터널' "$TUNNEL_PID" 'cloudflared tunnel --url http://127.0.0.1:4173'
-    stop_process 'FixLens 웹 서버' "$WEB_PID" "$ROOT/server/local.mjs"
+    stop_process 'FixLens 웹 서버' "$WEB_PID" 'server/local.mjs'
     stop_process '관리자가 시작한 Ollama' "$OLLAMA_PID" 'ollama serve'
     ;;
   tunnel-start) start_tunnel ;;
