@@ -1,0 +1,191 @@
+#!/bin/bash
+
+set -u
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+RUN_DIR="$ROOT/.run"
+WEB_PID="$RUN_DIR/web.pid"
+OLLAMA_PID="$RUN_DIR/ollama.pid"
+TUNNEL_PID="$RUN_DIR/tunnel.pid"
+WEB_URL="http://127.0.0.1:4173"
+OLLAMA_URL="http://127.0.0.1:11434"
+MODEL="qwen3.5:0.8b"
+
+mkdir -p "$RUN_DIR"
+
+find_bin() {
+  local name="$1"
+  command -v "$name" 2>/dev/null || true
+}
+
+service_responds() {
+  curl -fsS --max-time 2 "$1" >/dev/null 2>&1
+}
+
+managed_pid_matches() {
+  local pid_file="$1" needle="$2" pid command
+  [[ -f "$pid_file" ]] || return 1
+  pid="$(cat "$pid_file" 2>/dev/null || true)"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  [[ "$command" == *"$needle"* ]]
+}
+
+start_process() {
+  local name="$1" pid_file="$2" log_file="$3"
+  shift 3
+  nohup "$@" >>"$log_file" 2>&1 </dev/null &
+  echo "$!" >"$pid_file"
+  printf '%s 시작 중입니다. 로그: %s\n' "$name" "$log_file"
+}
+
+wait_for_service() {
+  local url="$1" attempts="$2" i
+  for ((i=0; i<attempts; i++)); do
+    service_responds "$url" && return 0
+    sleep 1
+  done
+  return 1
+}
+
+start_ollama() {
+  if service_responds "$OLLAMA_URL/api/tags"; then
+    printf 'Ollama가 이미 실행 중입니다.\n'
+    return 0
+  fi
+  local ollama_bin
+  ollama_bin="$(find_bin ollama)"
+  if [[ -z "$ollama_bin" ]]; then
+    printf 'Ollama 실행 파일을 찾지 못했습니다.\n'
+    return 1
+  fi
+  if managed_pid_matches "$OLLAMA_PID" 'ollama serve'; then
+    printf 'Ollama가 시작되는 중입니다.\n'
+  else
+    start_process 'Ollama' "$OLLAMA_PID" "$RUN_DIR/ollama.log" "$ollama_bin" serve
+  fi
+  if wait_for_service "$OLLAMA_URL/api/tags" 30; then
+    printf 'Ollama 준비 완료.\n'
+  else
+    printf 'Ollama가 응답하지 않습니다. 로그를 확인하세요: %s\n' "$RUN_DIR/ollama.log"
+    return 1
+  fi
+}
+
+start_web() {
+  if service_responds "$WEB_URL/api/health"; then
+    printf 'FixLens 웹 서버가 이미 실행 중입니다.\n'
+    return 0
+  fi
+  local node_bin
+  node_bin="$(find_bin node)"
+  if [[ -z "$node_bin" ]]; then
+    printf 'Node.js를 찾지 못했습니다. Node.js 20 이상을 설치하세요.\n'
+    return 1
+  fi
+  if managed_pid_matches "$WEB_PID" "$ROOT/server/local.mjs"; then
+    printf 'FixLens 웹 서버가 시작되는 중입니다.\n'
+  else
+    start_process 'FixLens 웹 서버' "$WEB_PID" "$RUN_DIR/web.log" "$node_bin" "$ROOT/server/local.mjs"
+  fi
+  if wait_for_service "$WEB_URL/api/health" 15; then
+    printf 'FixLens 웹 서버 준비 완료: %s\n' "$WEB_URL"
+  else
+    printf '웹 서버가 응답하지 않습니다. 로그를 확인하세요: %s\n' "$RUN_DIR/web.log"
+    return 1
+  fi
+}
+
+stop_process() {
+  local label="$1" pid_file="$2" needle="$3" pid
+  if ! managed_pid_matches "$pid_file" "$needle"; then
+    rm -f "$pid_file"
+    printf '%s는 이 관리자로 실행한 프로세스가 없습니다.\n' "$label"
+    return 0
+  fi
+  pid="$(cat "$pid_file")"
+  kill -TERM "$pid" 2>/dev/null || true
+  for _ in {1..5}; do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+  done
+  if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null || true; fi
+  rm -f "$pid_file"
+  printf '%s를 종료했습니다.\n' "$label"
+}
+
+start_all() {
+  start_ollama || true
+  start_web
+  if ! service_responds "$OLLAMA_URL/api/tags"; then
+    printf '참고: Ollama가 꺼져 있어도 기기 내 물체 감지는 사용할 수 있습니다.\n'
+  fi
+}
+
+start_tunnel() {
+  if managed_pid_matches "$TUNNEL_PID" 'cloudflared tunnel --url http://127.0.0.1:4173'; then
+    printf 'HTTPS 터널이 이미 실행 중입니다.\n'
+    grep -Eo 'https://[[:alnum:]-]+\.trycloudflare\.com' "$RUN_DIR/tunnel.log" | tail -1 || true
+    return 0
+  fi
+  if ! service_responds "$WEB_URL/api/health"; then
+    printf '먼저 FixLens 웹 서버를 시작하세요.\n'
+    return 1
+  fi
+  local tunnel_bin
+  tunnel_bin="$(find_bin cloudflared)"
+  if [[ -z "$tunnel_bin" ]]; then
+    printf 'cloudflared를 찾지 못했습니다.\n'
+    return 1
+  fi
+  : >"$RUN_DIR/tunnel.log"
+  start_process '임시 HTTPS 터널' "$TUNNEL_PID" "$RUN_DIR/tunnel.log" "$tunnel_bin" tunnel --url "$WEB_URL"
+  for _ in {1..15}; do
+    local url
+    url="$(grep -Eo 'https://[[:alnum:]-]+\.trycloudflare\.com' "$RUN_DIR/tunnel.log" | tail -1 || true)"
+    if [[ -n "$url" ]]; then
+      printf '휴대폰에서 열 HTTPS 주소: %s\n' "$url"
+      return 0
+    fi
+    sleep 1
+  done
+  printf '터널이 아직 주소를 만들지 못했습니다. 로그를 확인하세요: %s\n' "$RUN_DIR/tunnel.log"
+  return 1
+}
+
+show_status() {
+  printf '\nFixLens 웹 서버: '
+  if service_responds "$WEB_URL/api/health"; then curl -fsS "$WEB_URL/api/health"; else printf '꺼짐\n'; fi
+  printf 'Ollama: '
+  if service_responds "$OLLAMA_URL/api/tags"; then
+    curl -fsS "$OLLAMA_URL/api/tags" 2>/dev/null || printf '실행 중\n'
+  else
+    printf '꺼짐\n'
+  fi
+  printf '관리자 HTTPS 터널: '
+  if managed_pid_matches "$TUNNEL_PID" 'cloudflared tunnel --url http://127.0.0.1:4173'; then
+    grep -Eo 'https://[[:alnum:]-]+\.trycloudflare\.com' "$RUN_DIR/tunnel.log" | tail -1 || printf '시작 중\n'
+  else
+    printf '꺼짐\n'
+  fi
+  printf '로그 폴더: %s\n\n' "$RUN_DIR"
+}
+
+case "${1:-status}" in
+  start) start_all ;;
+  stop)
+    stop_process 'HTTPS 터널' "$TUNNEL_PID" 'cloudflared tunnel --url http://127.0.0.1:4173'
+    stop_process 'FixLens 웹 서버' "$WEB_PID" "$ROOT/server/local.mjs"
+    stop_process '관리자가 시작한 Ollama' "$OLLAMA_PID" 'ollama serve'
+    ;;
+  tunnel-start) start_tunnel ;;
+  tunnel-stop) stop_process 'HTTPS 터널' "$TUNNEL_PID" 'cloudflared tunnel --url http://127.0.0.1:4173' ;;
+  status) show_status ;;
+  open) open "$WEB_URL" ;;
+  logs)
+    tail -n 40 "$RUN_DIR/web.log" "$RUN_DIR/ollama.log" "$RUN_DIR/tunnel.log" 2>/dev/null || true
+    ;;
+  *) printf '사용법: %s {start|stop|tunnel-start|tunnel-stop|status|open|logs}\n' "$0"; exit 2 ;;
+esac
