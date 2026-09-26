@@ -1,92 +1,396 @@
-import {FrameGate} from './frame-gate.mjs';
-import {DetectionState} from './detection-state.mjs';
-const $=id=>document.getElementById(id),video=$('video'),canvas=$('canvas'),ctx=canvas.getContext('2d');
-const capture=document.createElement('canvas'),captureContext=capture.getContext('2d',{willReadFrequently:true});
-const gate=new FrameGate(),detections=new DetectionState();
-let stream=null,generation=0,worker=null,ready=false,loadTimer=null,lastRequest=-Infinity,videoSize='',lastList='';
-const names={person:'사람',bottle:'병',cup:'컵','cell phone':'휴대폰',mouse:'마우스',keyboard:'키보드',laptop:'노트북',book:'책',chair:'의자',scissors:'가위',clock:'시계',remote:'리모컨',tv:'TV',bowl:'그릇',banana:'바나나',apple:'사과',dog:'개',cat:'고양이',backpack:'배낭'};
-function modelMessage(message){$('modelMessage').textContent=message;}
-function clearInput(){gate.reset();detections.clear();ctx.clearRect(0,0,canvas.width,canvas.height);}
-function stopCamera(message='카메라가 꺼져 있습니다.') {
-  generation++;if(stream)stream.getTracks().forEach(t=>t.stop());
-  stream=null;video.srcObject=null;videoSize='';clearInput();
-  $('cameraEmpty').hidden=false;$('canvasTag').hidden=true;$('startCamera').disabled=false;$('stopCamera').disabled=true;
-  $('sourceLabel').textContent='연결 대기';$('emptyTitle').textContent='카메라를 연결하세요';$('cameraMessage').textContent=message;
+import { DetectionState } from './detection-state.mjs';
+
+const $ = (id) => document.getElementById(id);
+const video = $('video');
+const canvas = $('canvas');
+const ctx = canvas.getContext('2d');
+const capture = document.createElement('canvas');
+const captureCtx = capture.getContext('2d');
+const localCapture = document.createElement('canvas');
+const localCaptureCtx = localCapture.getContext('2d', { willReadFrequently: true });
+const detectionState = new DetectionState();
+const LABELS = {
+  'cell phone': '휴대폰', phone: '휴대폰', cable: '케이블', charger: '충전기', adapter: '어댑터',
+  'power strip': '멀티탭', key: '열쇠', keys: '열쇠', wallet: '지갑', glasses: '안경', book: '책', pen: '펜',
+  'remote': '리모컨', 'mouse': '마우스', 'keyboard': '키보드', 'laptop': '노트북', 'bottle': '병', 'cup': '컵',
+};
+const ENRICHMENT_INTERVAL_MS = 5_000;
+const LOCAL_MAX_WIDTH = 480;
+const SERVER_MAX_WIDTH = 960;
+
+let stream = null;
+let modelReady = false;
+let detectorReady = false;
+let recognitionActive = false;
+let candidates = [];
+let semanticCandidates = [];
+let activeView = 'elements';
+let toastTimer = null;
+let serverScanActive = false;
+let serverLoopGeneration = 0;
+let inferenceWorker = null;
+
+function setToast(message, persistent = false) {
+  const toast = $('scanToast');
+  toast.textContent = message;
+  toast.hidden = !message;
+  clearTimeout(toastTimer);
+  if (message && !persistent) toastTimer = setTimeout(() => { toast.hidden = true; }, 4500);
 }
-async function startCamera(){
-  stopCamera('카메라 권한을 허용해 주세요.');
-  if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia){$('cameraMessage').textContent='HTTPS 주소에서 Chrome 또는 Safari로 열고 카메라 권한을 허용하세요.';return;}
-  const request=++generation;$('startCamera').disabled=true;$('stopCamera').disabled=false;$('emptyTitle').textContent='카메라 연결 중';
-  try{
-    const acquired=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:$('facing').value},width:{ideal:1280},height:{ideal:720}}});
-    if(request!==generation){acquired.getTracks().forEach(t=>t.stop());return;}
-    stream=acquired;video.srcObject=acquired;await video.play();if(request!==generation)return;
-    $('cameraEmpty').hidden=true;$('canvasTag').hidden=false;$('startCamera').disabled=false;
-    $('cameraMessage').textContent='화면 전체에서 학습된 물체를 최대 50개까지 찾습니다. 작은 물체 보강은 더 오래 걸릴 수 있습니다.';
-    acquired.getVideoTracks().forEach(t=>t.addEventListener('ended',()=>{if(request===generation)stopCamera('카메라 연결이 종료되었습니다. 다시 연결하세요.');}));
-    clearInput();if(!worker)loadModel();
-  }catch(error){if(request!==generation)return;const messages={NotAllowedError:'카메라 권한이 차단되었습니다. 사이트 권한에서 허용하고 다시 연결하세요.',NotFoundError:'카메라를 찾지 못했습니다. 카메라가 있는 기기나 연결된 웹캠을 사용하세요.',NotReadableError:'다른 앱에서 카메라를 사용 중인지 확인하세요.'};stopCamera(messages[error.name]||'카메라 연결에 실패했습니다. 다시 시도하세요.');}
+
+function setDrawerOpen(open) {
+  $('drawer').classList.toggle('open', open);
+  $('drawerHandle').setAttribute('aria-expanded', String(open));
+  $('drawerBody').hidden = !open;
 }
-function failModel(message){
-  if(worker)worker.terminate();worker=null;ready=false;clearTimeout(loadTimer);detections.pending=null;detections.clear();
-  modelMessage(message);$('retryModel').hidden=false;$('modelBadge').textContent='연결 필요';
+
+function setView(view) {
+  activeView = view;
+  const layout = view === 'layout';
+  $('candidateSection').hidden = layout;
+  $('layoutSection').hidden = !layout;
+  $('drawerLabel').textContent = layout
+    ? `${$('zoneName').value.trim() || '공간'} · 2D 배치도`
+    : `공간 요소 · ${candidates.length}개`;
 }
-function loadModel(){
-  if(worker)worker.terminate();clearTimeout(loadTimer);detections.pending=null;detections.clear();ready=false;
-  $('retryModel').hidden=true;$('modelBadge').textContent='준비 중';modelMessage('AI 모델을 불러오고 있습니다. 첫 실행은 잠시 걸릴 수 있습니다.');
-  try{worker=new Worker('./inference-worker.js');}catch(_){failModel('이 브라우저에서 AI 실행을 시작하지 못했습니다. 다른 최신 브라우저로 열어주세요.');return;}
-  const current=worker;
-  loadTimer=setTimeout(()=>{if(worker===current)failModel('모델 준비 시간이 초과됐습니다. 연결 상태를 확인하고 다시 시도하세요.');},90000);
-  worker.onerror=()=>{if(worker===current)failModel('AI 실행 중 오류가 발생했습니다. 다시 시도하세요.');};
-  worker.onmessage=({data})=>{
-    if(worker!==current)return;
-    if(data.type==='ready'){clearTimeout(loadTimer);ready=true;$('modelBadge').textContent='기기 내 실행';$('backend').textContent=data.backend==='wasm'?'WebAssembly 가속':data.backend==='webgl'?'GPU 가속':'CPU 실행';modelMessage('AI 준비 완료. 카메라 영상에서 일상 물체를 인식합니다.');}
-    else if(data.type==='load-error'||data.type==='inference-error')failModel('AI 실행에 실패했습니다. 카메라는 유지됩니다. 모델을 다시 불러오세요.');
-    else if(data.type==='result'){
-      const now=performance.now();const accepted=detections.accept(data,now);
-      if(!accepted){if(stream&&ready)modelMessage('이전 또는 지연된 결과를 제외했습니다. 물체와 카메라를 잠시 고정하세요.');return;}
-      $('latency').textContent=`${Math.round(data.ms)} ms`;
-      modelMessage(data.ms>800?'인식 속도가 느립니다. 물체와 카메라를 잠시 고정하세요.':'이 기기에서 인식 중입니다. 물체를 움직여 박스가 따라오는지 확인하세요.');
+
+function normalizedLabel(label) {
+  const trimmed = String(label || '').trim().slice(0, 48);
+  return LABELS[trimmed.toLowerCase()] || trimmed;
+}
+
+function updateActionButton() {
+  const button = $('scanButton');
+  button.disabled = !stream || !detectorReady;
+  button.setAttribute('aria-pressed', String(recognitionActive));
+  button.classList.toggle('is-live', recognitionActive);
+  button.querySelector('span:last-child').textContent = recognitionActive ? '실시간 감지 중지' : '실시간 감지 시작';
+}
+
+async function checkHealth() {
+  try {
+    const response = await fetch('/api/health', { cache: 'no-store' });
+    const data = await response.json();
+    modelReady = response.ok && data.status === 'ok' && data.modelAvailable;
+  } catch { modelReady = false; }
+  if (!modelReady && recognitionActive) {
+    setToast('실시간 윤곽 감지는 작동 중이에요. Mac AI 연결 후 물체 이름을 보완합니다.', true);
+  }
+}
+
+function stopRecognition() {
+  recognitionActive = false;
+  serverLoopGeneration++;
+  semanticCandidates = [];
+  detectionState.clear();
+  updateCandidates(performance.now());
+  updateActionButton();
+}
+
+function stopCamera(message = '카메라가 꺼져 있어요.') {
+  stopRecognition();
+  if (stream) stream.getTracks().forEach((track) => track.stop());
+  stream = null;
+  video.srcObject = null;
+  $('cameraEmpty').hidden = false;
+  $('emptyTitle').textContent = '공간을 비춰주세요';
+  $('cameraMessage').textContent = message;
+  $('startCamera').disabled = false;
+  $('stopCamera').disabled = true;
+  updateActionButton();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+async function startCamera() {
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    $('cameraMessage').textContent = '카메라를 사용하려면 HTTPS 주소로 열어주세요.';
+    return;
+  }
+  $('startCamera').disabled = true;
+  try {
+    const acquired = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: $('facing').value }, width: { ideal: 1280 }, height: { ideal: 720 } },
+    });
+    stream = acquired;
+    video.srcObject = acquired;
+    await video.play();
+    $('cameraEmpty').hidden = true;
+    $('stopCamera').disabled = false;
+    updateActionButton();
+    acquired.getVideoTracks().forEach((track) => track.addEventListener('ended', () => stopCamera('카메라 연결이 끝났어요.')));
+    resizeCanvas();
+    draw();
+  } catch (error) {
+    const messages = {
+      NotAllowedError: '카메라 권한을 허용해 주세요.',
+      NotFoundError: '카메라를 찾지 못했어요.',
+      NotReadableError: '다른 앱이 카메라를 사용 중인지 확인해 주세요.',
+    };
+    $('cameraMessage').textContent = messages[error.name] || '카메라를 연결하지 못했어요.';
+    $('startCamera').disabled = false;
+  }
+}
+
+function resizeCanvas() {
+  if (!video.videoWidth || !video.videoHeight) return;
+  if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+  }
+}
+
+function overlap(a, b) {
+  const left = Math.max(a.x, b.x); const top = Math.max(a.y, b.y);
+  const right = Math.min(a.x + a.w, b.x + b.w); const bottom = Math.min(a.y + a.h, b.y + b.h);
+  const area = Math.max(0, right - left) * Math.max(0, bottom - top);
+  return area / (a.w * a.h + b.w * b.h - area || 1);
+}
+
+function updateCandidates(now) {
+  const local = detectionState.visible(now).map((item) => ({
+    name: normalizedLabel(item.name), score: item.score,
+    box: { x: item.x, y: item.y, w: item.w, h: item.h }, keep: true, source: 'device',
+  }));
+  const semantics = semanticCandidates.filter((item) => item.expiresAt > now);
+  const matchedSemantic = new Set();
+  candidates = local.map((item) => {
+    let best = -1; let bestOverlap = 0.08;
+    semantics.forEach((semantic, index) => {
+      const score = overlap(item.box, semantic.box);
+      if (score > bestOverlap) { best = index; bestOverlap = score; }
+    });
+    if (best < 0) return item;
+    matchedSemantic.add(best);
+    return { ...item, name: normalizedLabel(semantics[best].name), score: semantics[best].score, source: 'server' };
+  });
+  semantics.forEach((item, index) => {
+    if (!matchedSemantic.has(index) && item.score >= 0.45) {
+      candidates.push({ name: normalizedLabel(item.name), score: item.score, box: item.box, keep: true, source: 'server' });
     }
-  };worker.postMessage({type:'load'});
+  });
+  candidates = candidates.slice(0, 30);
+  updateLayoutButton();
+  if (recognitionActive && activeView === 'layout') buildLayout();
+  draw();
 }
-function draw(results){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  const scale=canvas.width/640;ctx.lineWidth=2.5*scale;ctx.font=`${16*scale}px sans-serif`;
-  for(const p of results){
-    const x=p.x*canvas.width,y=p.y*canvas.height,w=p.w*canvas.width,h=p.h*canvas.height;
-    const label=`${names[p.name]||p.name} ${Math.round(p.score*100)}%${p.held?' · 재확인':''}`,textW=ctx.measureText(label).width;
-    ctx.setLineDash(p.held?[6*scale,4*scale]:[]);ctx.strokeStyle='#b4f786';ctx.strokeRect(x,y,w,h);
-    const labelX=Math.max(0,Math.min(x,canvas.width-textW-12*scale)),labelY=Math.max(0,y-28*scale);
-    ctx.fillStyle='#b4f786';ctx.fillRect(labelX,labelY,textW+12*scale,27*scale);ctx.fillStyle='#152413';ctx.fillText(label,labelX+6*scale,labelY+19*scale);
-  }
-  $('count').textContent=String(results.length);
-  const key=JSON.stringify(results.map(p=>[p.name,Math.round(p.score*100),p.held]))+Boolean(stream&&ready);
-  if(key!==lastList){lastList=key;const list=$('objects');list.replaceChildren();
-    if(!results.length){const li=document.createElement('li');li.className='empty-result';li.textContent=stream&&ready?'인식된 물체가 없습니다. 밝은 곳에서 병·컵·책을 비춰보세요.':'카메라와 AI가 준비되면 결과가 표시됩니다.';list.append(li);}
-    for(const p of results){const li=document.createElement('li'),name=document.createElement('span'),score=document.createElement('strong');name.textContent=names[p.name]||p.name;score.textContent=p.held?'재확인':`${Math.round(p.score*100)}%`;li.append(name,score);list.append(li);}
+
+function draw() {
+  resizeCanvas();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const boxes = candidates.filter((item) => item.keep);
+  const scale = canvas.width / 960;
+  ctx.lineWidth = Math.max(2, 3 * scale);
+  ctx.font = `${Math.max(13, 18 * scale)}px -apple-system, sans-serif`;
+  for (const item of boxes) {
+    const { x, y, w, h } = item.box;
+    const bx = x * canvas.width; const by = y * canvas.height;
+    const bw = w * canvas.width; const bh = h * canvas.height;
+    ctx.strokeStyle = item.source === 'server' ? '#d6a65a' : '#849579';
+    ctx.strokeRect(bx, by, bw, bh);
+    const label = normalizedLabel(item.name);
+    const textWidth = ctx.measureText(label).width;
+    const labelY = Math.max(0, by - 28 * scale);
+    ctx.fillStyle = item.source === 'server' ? '#f5e4bf' : '#f3efe3';
+    ctx.fillRect(Math.max(0, bx), labelY, textWidth + 16 * scale, 25 * scale);
+    ctx.fillStyle = '#303b31';
+    ctx.fillText(label, Math.max(0, bx) + 8 * scale, labelY + 18 * scale);
   }
 }
-function tick(now){
-  const size=`${video.videoWidth}x${video.videoHeight}`;
-  if(stream&&video.videoWidth&&video.videoHeight&&size!==videoSize){videoSize=size;canvas.width=video.videoWidth;canvas.height=video.videoHeight;$('stage').style.aspectRatio=`${canvas.width} / ${canvas.height}`;clearInput();}
-  const frame=gate.sample(video,stream?.getVideoTracks()[0],now);
-  const active=!!stream&&frame.fresh&&!document.hidden;
-  if(!active&&(detections.results.length||detections.pending?.epoch===detections.epoch))detections.clear();
-  if(stream)$('sourceLabel').textContent=active?'실시간 연결됨':'영상 입력 대기';
-  if(detections.pending&&now-detections.pending.capturedAt>20000)failModel('AI 응답 시간이 초과됐습니다. 다시 불러오세요.');
-  if(active&&frame.changed&&ready&&!detections.pending&&now-lastRequest>=120){
-    const ratio=Math.min(1,960/video.videoWidth,720/video.videoHeight);
-    capture.width=Math.max(1,Math.round(video.videoWidth*ratio));capture.height=Math.max(1,Math.round(video.videoHeight*ratio));
-    try{
-      captureContext.drawImage(video,0,0,capture.width,capture.height);
-      const image=captureContext.getImageData(0,0,capture.width,capture.height),job=detections.begin(now,capture.width,capture.height);
-      lastRequest=now;worker.postMessage({type:'detect',...job,detail:$('detail').checked,pixels:image.data.buffer},[image.data.buffer]);
-    }catch(_){failModel('영상 프레임을 AI에 전달하지 못했습니다. 다시 시도하세요.');}
-  }
-  draw(active?detections.visible(now):[]);requestAnimationFrame(tick);
+
+function updateLayoutButton() {
+  const count = candidates.filter((item) => item.keep && item.name.trim()).length;
+  $('candidateCount').textContent = String(count);
+  $('createLayoutButton').disabled = count === 0;
+  $('createLayoutButton').textContent = count ? `2D 배치도 만들기 · ${count}개` : '공간 요소를 먼저 확인해요';
+  $('drawerLabel').textContent = activeView === 'layout'
+    ? `${$('zoneName').value.trim() || '공간'} · 2D 배치도`
+    : `공간 요소 · ${candidates.length}개`;
 }
-$('startCamera').onclick=startCamera;$('stopCamera').onclick=()=>stopCamera();$('facing').onchange=()=>{if(stream)startCamera();};$('retryModel').onclick=loadModel;$('detail').onchange=()=>clearInput();
-document.addEventListener('visibilitychange',()=>{clearInput();lastList='';});
-window.addEventListener('pagehide',()=>{stopCamera();if(worker)worker.terminate();worker=null;ready=false;clearTimeout(loadTimer);detections.pending=null;});
-requestAnimationFrame(tick);
+
+function renderCandidates() {
+  const list = $('candidates');
+  list.replaceChildren();
+  if (!candidates.length) {
+    const empty = document.createElement('li');
+    empty.className = 'empty-result';
+    empty.textContent = '카메라에 물체를 비추면 윤곽을 표시해요.';
+    list.append(empty);
+  }
+  for (const item of candidates) {
+    const row = document.createElement('li');
+    row.className = 'candidate-row';
+    const label = document.createElement('label');
+    label.className = 'check-label';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox'; checkbox.checked = item.keep;
+    checkbox.setAttribute('aria-label', `${item.name} 배치도에 포함`);
+    checkbox.addEventListener('change', () => { item.keep = checkbox.checked; updateLayoutButton(); draw(); });
+    const name = document.createElement('input');
+    name.className = 'candidate-name'; name.value = item.name; name.maxLength = 48;
+    name.setAttribute('aria-label', '공간 요소 이름');
+    name.addEventListener('input', () => { item.name = name.value; draw(); });
+    label.append(checkbox, name);
+    row.append(label);
+    list.append(row);
+  }
+  updateLayoutButton();
+}
+
+function buildLayout() {
+  const items = candidates.filter((item) => item.keep && item.name.trim());
+  const map = $('layoutCanvas');
+  map.replaceChildren();
+  for (const item of items) {
+    const node = document.createElement('span');
+    node.className = 'map-object';
+    node.textContent = item.name;
+    node.style.left = `${Math.max(1, Math.min(88, item.box.x * 100))}%`;
+    node.style.top = `${Math.max(2, Math.min(82, item.box.y * 100))}%`;
+    node.style.width = `${Math.max(10, Math.min(38, item.box.w * 100))}%`;
+    node.style.height = `${Math.max(11, Math.min(28, item.box.h * 100))}%`;
+    map.append(node);
+  }
+  $('layoutCanvas').setAttribute('aria-label', `${$('zoneName').value.trim() || '공간'}의 현재 화면 기준 2D 배치도 초안`);
+}
+
+function createLayout() {
+  buildLayout();
+  setView('layout');
+  setDrawerOpen(true);
+}
+
+function captureDimensions(maxWidth) {
+  const ratio = Math.min(1, maxWidth / video.videoWidth, 720 / video.videoHeight);
+  return { width: Math.max(1, Math.round(video.videoWidth * ratio)), height: Math.max(1, Math.round(video.videoHeight * ratio)) };
+}
+
+function runLocalDetectorFrame(now) {
+  if (!recognitionActive || !stream || !detectorReady || !video.videoWidth || !video.videoHeight) return;
+  if (detectionState.pending || now - (detectionState.capturedAt || 0) < 130) return;
+  const { width, height } = captureDimensions(LOCAL_MAX_WIDTH);
+  localCapture.width = width; localCapture.height = height;
+  localCaptureCtx.drawImage(video, 0, 0, width, height);
+  const pixels = localCaptureCtx.getImageData(0, 0, width, height);
+  const job = detectionState.begin(now, width, height);
+  if (job) inferenceWorker.postMessage({ type: 'detect', id: job.id, width, height, pixels: pixels.data.buffer }, [pixels.data.buffer]);
+}
+
+async function enrichWithServer(generation) {
+  if (!modelReady || !recognitionActive || !stream || generation !== serverLoopGeneration || serverScanActive || !video.videoWidth) return;
+  serverScanActive = true;
+  try {
+    const { width, height } = captureDimensions(SERVER_MAX_WIDTH);
+    capture.width = width; capture.height = height;
+    captureCtx.drawImage(video, 0, 0, width, height);
+    const blob = await new Promise((resolve) => capture.toBlob(resolve, 'image/jpeg', 0.82));
+    if (!blob || !recognitionActive || generation !== serverLoopGeneration) return;
+    const response = await fetch('/api/scan', {
+      method: 'POST',
+      headers: { 'content-type': 'image/jpeg', 'x-image-width': String(width), 'x-image-height': String(height) },
+      body: blob,
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || 'Mac AI가 장면 이름을 보완하지 못했어요.');
+    if (!recognitionActive || generation !== serverLoopGeneration) return;
+    semanticCandidates = (result.detections || []).map((item) => ({
+      name: item.label,
+      score: item.score,
+      box: item.box,
+      expiresAt: performance.now() + ENRICHMENT_INTERVAL_MS * 1.5,
+    }));
+    updateCandidates(performance.now());
+    setToast('기기에서 윤곽을 추적하고 Mac AI가 이름을 보완 중이에요.');
+  } catch (error) {
+    if (recognitionActive && generation === serverLoopGeneration) setToast(error.message || 'Mac AI 서버 연결을 확인해 주세요.', true);
+  } finally { serverScanActive = false; }
+}
+
+async function serverEnrichmentLoop(generation) {
+  while (recognitionActive && stream && generation === serverLoopGeneration) {
+    await enrichWithServer(generation);
+    if (!recognitionActive || generation !== serverLoopGeneration) break;
+    await new Promise((resolve) => setTimeout(resolve, ENRICHMENT_INTERVAL_MS));
+  }
+}
+
+function startRecognition() {
+  if (!stream || !detectorReady) return;
+  recognitionActive = true;
+  semanticCandidates = [];
+  updateActionButton();
+  setToast(modelReady
+    ? '실시간 윤곽 감지를 시작했어요. 서버 AI가 물체 이름도 보완합니다.'
+    : '실시간 윤곽 감지를 시작했어요. Mac AI 연결이 없어 이름 보완은 꺼져 있습니다.', true);
+  serverEnrichmentLoop(++serverLoopGeneration);
+}
+
+function toggleRecognition() {
+  if (recognitionActive) {
+    stopRecognition();
+    setToast('실시간 감지를 멈췄어요.');
+  } else startRecognition();
+}
+
+function animate(now) {
+  if (recognitionActive) runLocalDetectorFrame(now);
+  requestAnimationFrame(animate);
+}
+
+function initializeDetector() {
+  try {
+    inferenceWorker = new Worker(new URL('./inference-worker.js', import.meta.url));
+    inferenceWorker.onmessage = ({ data }) => {
+      if (data.type === 'ready') {
+        detectorReady = true;
+        updateActionButton();
+        $('cameraMessage').textContent = '감지 모델 준비 완료 · 카메라를 켜고 실시간 감지를 시작하세요.';
+        return;
+      }
+      if (data.type === 'load-error') {
+        detectorReady = false;
+        updateActionButton();
+        $('cameraMessage').textContent = '기기 물체 감지 모델을 불러오지 못했어요.';
+        setToast(`실시간 감지 모델 오류: ${data.message}`, true);
+        return;
+      }
+      if (data.type === 'result') {
+        detectionState.accept(data, performance.now());
+        updateCandidates(performance.now());
+      }
+      if (data.type === 'inference-error' && detectionState.pending?.id === data.id) {
+        detectionState.accept({ id: data.id, results: [] }, performance.now());
+        updateCandidates(performance.now());
+      }
+    };
+    inferenceWorker.onerror = () => {
+      detectorReady = false;
+      stopRecognition();
+      setToast('실시간 감지 워커를 실행하지 못했어요.', true);
+    };
+    inferenceWorker.postMessage({ type: 'load' });
+  } catch (error) {
+    detectorReady = false;
+    setToast(`실시간 감지를 시작하지 못했어요: ${error.message}`, true);
+  }
+}
+
+$('startCamera').addEventListener('click', startCamera);
+$('stopCamera').addEventListener('click', () => stopCamera());
+$('scanButton').addEventListener('click', toggleRecognition);
+$('createLayoutButton').addEventListener('click', createLayout);
+$('rescanButton').addEventListener('click', () => { semanticCandidates = []; setView('elements'); renderCandidates(); draw(); });
+$('drawerHandle').addEventListener('click', () => {
+  if ($('drawer').classList.contains('open')) setDrawerOpen(false);
+  else { setView(activeView); renderCandidates(); setDrawerOpen(true); }
+});
+$('facing').addEventListener('change', () => { if (stream) { const wasActive = recognitionActive; stopCamera(); startCamera().then(() => { if (wasActive && stream) startRecognition(); }); } });
+video.addEventListener('loadedmetadata', () => { resizeCanvas(); draw(); });
+window.addEventListener('pagehide', () => {
+  if (stream) stream.getTracks().forEach((track) => track.stop());
+  if (inferenceWorker) inferenceWorker.terminate();
+});
+
+initializeDetector();
+checkHealth();
+requestAnimationFrame(animate);

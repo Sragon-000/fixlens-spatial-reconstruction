@@ -1,32 +1,56 @@
 <!doctype html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#101718"><meta name="description" content="기기 안에서 AI로 실시간 물체를 인식하는 FixLens 카메라">
-  <title>FixLens · AI 카메라</title><link rel="stylesheet" href="./style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f3efe4">
+  <meta name="description" content="카메라 화면에서 물체를 실시간 감지하고 공간 배치를 살펴보는 FixLens">
+  <title>FixLens · 공간 재구성</title>
+  <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-  <header><a class="brand" href="./"><span class="logo" aria-hidden="true">⌗</span> FixLens</a><span class="version">실시간 물체 인식 <b>PROTOTYPE</b></span></header>
-  <main>
-    <section class="intro"><div><span class="eyebrow">ON-DEVICE VISION</span><h1>비추면, AI가 알아봅니다.</h1></div><p>카메라 영상은 이 기기에 머뭅니다.<br>AI가 물체의 종류와 위치를 자동으로 찾습니다.</p></section>
-    <div class="workspace">
-      <section class="viewer-panel" aria-label="카메라 및 AI 인식 결과">
-        <div class="viewer-toolbar"><strong>내 카메라</strong><span id="sourceLabel">연결 대기</span></div>
-        <div id="stage" class="stage"><video id="video" autoplay muted playsinline></video><canvas id="canvas" width="1280" height="720" aria-label="AI가 검출한 물체 위치와 신뢰도"></canvas><span id="canvasTag" class="canvas-tag" hidden>실시간 영상 · 기기 내 AI</span><div id="cameraEmpty" class="camera-empty"><strong id="emptyTitle">카메라를 연결하세요</strong><p>휴대폰 후면 카메라 또는 연결된 웹캠의<br>실시간 영상을 사용합니다.</p><button id="startCamera" class="primary">카메라 연결</button></div></div>
-        <div id="cameraControls">
-          <div class="camera-actions"><button id="stopCamera" disabled>카메라 끄기</button><select id="facing" aria-label="카메라 방향"><option value="environment">후면 카메라</option><option value="user">전면 카메라</option></select></div><label class="detail-option"><input id="detail" type="checkbox" checked> 작은 물체까지 찾기 <small>화면을 나누어 추가 확인 · 속도는 느려질 수 있습니다</small></label>
-          <p id="cameraMessage" role="status">카메라 연결 후 AI가 화면 전체에서 물체를 자동으로 찾습니다.</p>
-        </div>
-
-      </section>
-      <aside class="guide-panel">
-        <div class="panel-heading"><span class="eyebrow">AI VISION</span><span id="modelBadge" class="model-badge">대기</span></div>
-        <div class="status-card model-card"><strong>이 기기에서 인식</strong><p id="modelMessage" role="status" aria-live="polite">카메라를 연결하면 AI 모델을 준비합니다.</p><button id="retryModel" hidden>AI 다시 불러오기</button></div>
-        <div class="metrics"><div><span>인식된 물체</span><strong id="count">0</strong></div><div><span>최근 추론 시간</span><strong id="latency" class="latency">—</strong></div></div>
-        <h2 class="results-title">인식 결과</h2><ul id="objects" class="objects"><li class="empty-result">카메라와 AI가 준비되면 결과가 표시됩니다.</li></ul>
-        <div class="scope-note"><strong>화면 전체의 물체 인식</strong><p>일상 물체 80종을 학습한 경량 모델을 사용합니다. 신뢰도 기준을 낮춰 더 많이 찾지만 오인식도 늘 수 있습니다. 모든 물체를 인식하지는 않으며, RAM이나 장착 상태는 판정하지 않습니다.</p><p>COCO-SSD · MobileNet V2 Lite<br><span id="backend">실행 대기</span> · 신뢰도 35% 이상 · 최대 50개 표시</p><p>첫 실행에는 모델 다운로드가 필요합니다. 촬영 영상은 서버로 전송하지 않습니다.</p></div>
-      </aside>
-    </div>
-    <footer><span>FixLens / AI 물체 인식</span><span>카메라 영상은 이 기기에서만 표시됩니다.</span></footer>
-  </main><script type="module" src="./app.mjs"></script>
-</body></html>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="FixLens"><span class="logo" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M6 27V6h20v21M6 14h20M6 21h20M16 14v7"/><circle cx="22" cy="10" r="2"/></svg></span><span>FixLens</span></a>
+    <span class="product-label">공간 재구성</span>
+    <label class="zone-field"><span class="zone-mark" aria-hidden="true">⌂</span><span class="visually-hidden">공간 이름</span><input id="zoneName" maxlength="40" value="책상 위" aria-label="공간 이름"></label>
+  </header>
+  <main class="camera-layout">
+    <section id="stage" class="stage" aria-label="공간 카메라 화면">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="canvas" aria-label="인식된 공간 요소 위치"></canvas>
+      <div id="cameraEmpty" class="camera-empty">
+        <span class="camera-glyph" aria-hidden="true">⌂</span>
+        <strong id="emptyTitle">공간을 비춰주세요</strong>
+        <button id="startCamera" class="primary start-button" type="button">카메라 켜기</button>
+        <p id="cameraMessage" class="camera-message">보이는 장면에서 물건 배치를 추정합니다.</p>
+      </div>
+      <p class="privacy-note">윤곽 감지는 기기에서 실행 · AI 이름 보완용 장면은 Mac 서버로 전송</p>
+      <div id="scanToast" class="scan-toast" role="status" aria-live="polite" hidden></div>
+      <div class="camera-toolbar">
+        <button id="stopCamera" class="icon-button" type="button" disabled aria-label="카메라 끄기" title="카메라 끄기">끄기</button>
+        <button id="scanButton" class="scan-button" type="button" disabled aria-pressed="false"><span class="memory-mark" aria-hidden="true">⌖</span><span>실시간 감지 시작</span></button>
+        <select id="facing" class="facing-select" aria-label="카메라 방향"><option value="environment">후면</option><option value="user">전면</option></select>
+      </div>
+    </section>
+    <section id="drawer" class="drawer" aria-label="공간 재구성 결과">
+      <button id="drawerHandle" class="drawer-handle" type="button" aria-expanded="false" aria-controls="drawerBody">
+        <span id="drawerLabel">배치도 · 스캔 전</span>
+        <span class="drawer-chevron" aria-hidden="true">⌃</span>
+      </button>
+      <div id="drawerBody" class="drawer-body" hidden>
+        <section id="candidateSection" class="drawer-section">
+          <p class="section-title">공간 요소 <span id="candidateCount">0</span></p>
+          <ul id="candidates" class="objects"><li class="empty-result">카메라에 물체를 비추면 윤곽을 표시해요.</li></ul>
+          <button id="createLayoutButton" class="primary wide" type="button" disabled>2D 배치도 만들기</button>
+        </section>
+        <section id="layoutSection" class="drawer-section" hidden>
+          <div id="layoutCanvas" class="layout-canvas" role="img" aria-label="현재 카메라 장면의 2D 배치도"></div>
+          <p class="layout-caption">현재 화면에서 추정한 2D 배치 초안 · 깊이와 3D 구조는 포함하지 않아요.</p>
+          <button id="rescanButton" class="quiet-button" type="button">다른 장면 다시 담기</button>
+        </section>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="./app.mjs"></script>
+</body>
+</html>

@@ -1,17 +1,63 @@
-# FixLens on-device AI camera
+# FixLens · 실시간 공간 재구성 프로토타입
 
-The browser captures its own camera. COCO-SSD / lite_mobilenet_v2 performs actual object detection inside a dedicated Web Worker on that device. No frame upload or inference server exists. The public static files include pinned TensorFlow.js 4.22.0, COCO-SSD 2.2.3, WASM binaries and all model weights (about 22 MB total). An initial network download is required; offline availability is not promised.
+FixLens는 모바일 웹 카메라로 책상이나 서랍 같은 작은 공간을 비추고, 화면에 보이는 물체와 대략적인 배치를 확인하는 프로토타입입니다. 카메라를 켜고 **실시간 감지 시작**을 누르면 감지 상자가 카메라 화면 위에 표시됩니다.
 
-WASM is preferred, then WebGL, then CPU. No cross-origin isolation is required for single-thread WASM. Camera preview remains on the UI thread. Model inputs are reduced to at most 960×720 while preserving aspect ratio; output boxes are normalized and mapped back to actual video dimensions.
+## 동작 방식
 
-Only one inference may run at a time. Results older than 2 seconds or from a previous camera/visibility/size session are discarded. Boxes expire 650ms after the last accepted result, and disappear immediately on an empty detection result or camera interruption. A partial miss may retain a dashed, explicitly marked box for at most 250ms since its last observation. One-to-one same-class matching smooths coordinates with 75% new / 25% previous position. This version repeatedly detects objects; it does not implement persistent object IDs, RAM orientation, assembly classification or physical insertion checks.
+1. 브라우저에서 COCO-SSD Lite MobileNet 모델을 Web Worker와 WASM으로 실행해 카메라 장면을 계속 감지합니다.
+2. 감지된 물체에 사각 경계 상자와 이름을 카메라 화면 위에 그립니다.
+3. 감지가 켜져 있는 동안 현재 장면을 Mac의 Ollama 서버로 간헐적으로 보내 `qwen3.5:0.8b`가 이름과 감지 후보를 보완합니다. 전송 사이에는 최소 5초 간격을 두며, 앞선 분석이 오래 걸리면 다음 전송도 늦어집니다.
+4. 후보를 확인하고 현재 카메라 화면 기준 2D 배치도 초안을 볼 수 있습니다.
 
-Serve dist/ over HTTPS for phone camera access, or localhost for desktop development.
+기본 물체 감지는 휴대폰 브라우저에서 이뤄집니다. Mac의 Qwen 모델은 간헐적으로 물체 이름을 보완합니다. 브라우저와 기기 성능에 따라 감지 속도가 달라집니다.
 
-- Regression tests: node --test tests/*.test.mjs
-- Actual model and shipped worker smoke test: node tests/model-smoke.mjs
-- Optional reference image input: node tests/model-smoke.mjs PATH_TO_RGBA WIDTH HEIGHT
+## 현재 범위와 한계
 
-No browser or phone hardware benchmark is claimed. See REVIEW.md and THIRD_PARTY.md.
+- 화면 강조는 물체의 픽셀 단위 외곽선이 아닌 사각 경계 상자입니다.
+- 브라우저 감지기는 COCO의 일반 물체 범주를 중심으로 인식합니다. 특정 생활용품이나 작은 물체를 놓치거나 잘못 분류할 수 있습니다.
+- Qwen의 상자 좌표와 이름도 추정치이며, 카메라 화면의 윤곽 갱신보다 느릴 수 있습니다.
+- 배치도는 한 화면에서 추정한 2D 초안입니다. 깊이, 카메라 자세, 가려진 물체, 여러 시점 간 정합, 실제 3D 공간은 재구성하지 않습니다.
+- 스캔 영상이나 공간 지도를 디스크에 저장하지 않습니다. 이름과 위치는 현재 페이지 세션에서만 사용합니다.
 
-Full-scene detection: up to 50 boxes, confidence >=0.35. Detail mode (enabled by default) performs a full view plus four overlapping 60% crops, maps detections to the full image and suppresses same-class duplicate boxes at IoU >0.45. Disable the detail checkbox for faster single-view inference. More detections do not guarantee higher precision.
+## Mac에서 실행
+
+필요한 것: Node.js 20 이상, Ollama, 그리고 프로젝트의 `dist/`에 포함된 COCO-SSD 및 WASM 모델 파일.
+
+```sh
+ollama pull qwen3.5:0.8b
+ollama serve
+node server/local.mjs
+```
+
+Ollama가 이미 백그라운드에서 실행 중이면 `ollama serve`를 다시 시작할 필요는 없습니다. 서버는 기본적으로 `http://127.0.0.1:4173`에서 열립니다. `/api/health`가 모델 사용 가능 상태를 반환하면 Qwen 이름 보완도 준비된 것입니다. Ollama를 사용할 수 없어도 브라우저의 기본 실시간 물체 감지는 동작합니다.
+
+## 휴대폰에서 카메라 테스트
+
+휴대폰 브라우저의 카메라는 HTTPS 페이지에서 열어야 합니다. Mac에서 앱 서버와 Ollama를 실행한 다음 개발용 HTTPS 터널을 엽니다.
+
+```sh
+cloudflared tunnel --url http://127.0.0.1:4173
+```
+
+터미널에 표시된 HTTPS 주소를 휴대폰에서 열고 카메라 권한을 허용한 뒤 **실시간 감지 시작**을 누릅니다. Quick Tunnel 주소는 실행을 다시 할 때 바뀌며, Mac과 서버 프로세스가 켜져 있을 때만 사용할 수 있습니다.
+
+휴대폰의 실시간 감지 프레임은 기기 안에서 처리합니다. Qwen 이름 보완을 위해 보내는 장면 이미지는 HTTPS 터널을 지나 Mac의 Ollama 서버에 도달하며, 이 앱은 원본 이미지를 저장하지 않습니다. Quick Tunnel은 개발용 공개 주소이므로 링크를 아는 사람이 접속할 수 있습니다.
+
+## 설정
+
+| 환경 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `PORT` | `4173` | 웹 서버 포트 |
+| `FIXLENS_HOST` | `127.0.0.1` | 서버 바인딩 주소 |
+| `OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama 서버 주소 |
+| `OLLAMA_MODEL` | `qwen3.5:0.8b` | 이름 보완에 사용할 설치된 Ollama 모델 |
+
+서버는 이미지 요청을 JPEG, PNG, WebP 및 최대 2MB, 960×720으로 제한하고 한 번에 하나의 추론 요청만 처리합니다. 브라우저 요청 횟수도 제한합니다.
+
+## 검증
+
+```sh
+node --check dist/app.mjs
+node --test tests/camera.test.mjs tests/detection-state.test.mjs tests/frame-gate.test.mjs tests/detection-utils.test.mjs
+node tests/model-smoke.mjs
+```
