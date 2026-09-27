@@ -133,9 +133,12 @@ stop_process() {
 
 start_all() {
   start_ollama || true
-  start_web
+  start_web || return 1
   if ! service_responds "$OLLAMA_URL/api/tags"; then
     printf '참고: Ollama가 꺼져 있어도 기기 내 물체 감지는 사용할 수 있습니다.\n'
+  fi
+  if ! start_tunnel; then
+    printf '웹 서버는 실행 중입니다. 휴대폰 QR을 자동으로 열지 못했어요. 메뉴에서 HTTPS 터널 상태를 확인하세요.\n'
   fi
 }
 

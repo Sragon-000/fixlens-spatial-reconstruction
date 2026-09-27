@@ -1,4 +1,5 @@
 import { DetectionState } from './detection-state.mjs';
+import { ArAnchorPreview } from './ar-anchor-preview.mjs';
 
 const $ = (id) => document.getElementById(id);
 const video = $('video');
@@ -9,6 +10,12 @@ const captureCtx = capture.getContext('2d');
 const localCapture = document.createElement('canvas');
 const localCaptureCtx = localCapture.getContext('2d', { willReadFrequently: true });
 const detectionState = new DetectionState();
+let webxrArSupported = false;
+let guideCameraResumePromise = null;
+const arAnchorPreview = new ArAnchorPreview({
+  canvas: $('arCanvas'), overlay: $('arOverlay'), message: $('arOverlayMessage'), exitButton: $('arExitButton'),
+  onEnd: () => { void restoreGuideCameraAfterAr(); },
+});
 const LABELS = {
   'cell phone': '휴대폰', phone: '휴대폰', cable: '케이블', charger: '충전기', adapter: '어댑터',
   'power strip': '멀티탭', key: '열쇠', keys: '열쇠', wallet: '지갑', glasses: '안경', book: '책', pen: '펜',
@@ -21,6 +28,7 @@ const SCAN_ROWS = 3;
 const SCAN_TILE_COUNT = SCAN_COLUMNS * SCAN_ROWS;
 
 let stream = null;
+let fullscreenRequestedByApp = false;
 let modelReady = false;
 let detectorReady = false;
 let recognitionActive = false;
@@ -119,12 +127,27 @@ function stopCamera(message = '카메라가 꺼져 있어요.') {
   stream = null;
   video.srcObject = null;
   $('cameraEmpty').hidden = false;
+  $('arCapability').hidden = true;
   $('emptyTitle').textContent = '공간을 비춰주세요';
   $('cameraMessage').textContent = message;
   $('startCamera').disabled = false;
   $('stopCamera').disabled = true;
+  document.body.classList.remove('camera-live');
+  screen.orientation?.unlock?.();
+  if (fullscreenRequestedByApp && document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+  fullscreenRequestedByApp = false;
   updateActionButton();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function requestCameraPresentation() {
+  let fullscreen = Promise.resolve();
+  if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+    fullscreen = document.documentElement.requestFullscreen({ navigationUI: 'hide' })
+      .then(() => { fullscreenRequestedByApp = Boolean(document.fullscreenElement); })
+      .catch(() => {});
+  }
+  void fullscreen.then(() => screen.orientation?.lock?.('landscape').catch(() => {}));
 }
 
 async function startCamera() {
@@ -133,6 +156,7 @@ async function startCamera() {
     return;
   }
   $('startCamera').disabled = true;
+  requestCameraPresentation();
   try {
     const acquired = await navigator.mediaDevices.getUserMedia({
       audio: false,
@@ -141,8 +165,24 @@ async function startCamera() {
     stream = acquired;
     video.srcObject = acquired;
     await video.play();
-    workflowStage = 'ready';
+    const returningToGuide = workflowStage === 'guiding';
+    if (returningToGuide) {
+      detectionState.clear();
+      detectionState.seed(arrangement.map((step) => ({
+        name: step.sourceName, sourceName: step.sourceName, detectorName: step.detectorName,
+        trackId: step.trackId, box: step.source, score: 1,
+      })));
+      resetMovementEvidence();
+      recognitionActive = true;
+    } else {
+      workflowStage = 'ready';
+    }
     $('cameraEmpty').hidden = true;
+    document.body.classList.add('camera-live');
+    $('startCamera').textContent = '카메라 켜기';
+    $('arCapability').hidden = false;
+    $('arCapability').textContent = 'AR 세션 지원 확인 중';
+    void updateArCapability();
     $('stopCamera').disabled = false;
     updateActionButton();
     acquired.getVideoTracks().forEach((track) => track.addEventListener('ended', () => stopCamera('카메라 연결이 끝났어요.')));
@@ -157,7 +197,109 @@ async function startCamera() {
     };
     $('cameraMessage').textContent = messages[error.name] || '카메라를 연결하지 못했어요.';
     $('startCamera').disabled = false;
+    if (fullscreenRequestedByApp && document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+    fullscreenRequestedByApp = false;
   }
+}
+
+async function updateArCapability() {
+  const status = $('arCapability');
+  if (!stream) { status.hidden = true; webxrArSupported = false; return; }
+  if (!window.isSecureContext || !navigator.xr?.isSessionSupported) {
+    webxrArSupported = false;
+    status.textContent = '공간 고정 AR 미지원 · 화면 추적 모드';
+    if (workflowStage === 'guiding') showGuideStep();
+    return;
+  }
+  try {
+    const supported = await navigator.xr.isSessionSupported('immersive-ar');
+    if (!stream) return;
+    webxrArSupported = supported;
+    status.textContent = supported
+      ? 'AR 세션 가능 · 시작 시 필수 기능 확인'
+      : '공간 고정 AR 미지원 · 화면 추적 모드';
+    if (workflowStage === 'guiding') showGuideStep();
+  } catch {
+    if (!stream) return;
+    webxrArSupported = false;
+    status.textContent = 'AR 지원을 확인할 수 없음 · 화면 추적 모드';
+    if (workflowStage === 'guiding') showGuideStep();
+  }
+}
+
+async function startArAnchorGuide() {
+  if (!webxrArSupported || workflowStage !== 'guiding' || !stream) return;
+  $('startArAnchorButton').disabled = true;
+  recognitionActive = false;
+  detectionState.clear();
+  stream.getTracks().forEach((track) => track.stop());
+  stream = null;
+  video.srcObject = null;
+  document.body.classList.remove('camera-live');
+  $('arCapability').hidden = true;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  updateActionButton();
+  try {
+    await arAnchorPreview.start();
+  } catch (error) {
+    const reason = error.name === 'NotSupportedError'
+      ? '이 기기에서 표면 인식 또는 AR 화면 조작을 지원하지 않아요.'
+      : error.message;
+    setToast(`AR 위치 고정을 시작하지 못했어요: ${reason}`, true);
+    await restoreGuideCameraAfterAr();
+  } finally {
+    $('startArAnchorButton').disabled = false;
+  }
+}
+
+function restoreGuideCameraAfterAr() {
+  if (stream) return Promise.resolve();
+  if (guideCameraResumePromise) return guideCameraResumePromise;
+  guideCameraResumePromise = (async () => {
+    try {
+      const acquired = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: { ideal: $('facing').value }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      });
+      stream = acquired;
+      video.srcObject = acquired;
+      await video.play();
+      workflowStage = 'guiding';
+      detectionState.clear();
+      detectionState.seed(arrangement.map((step) => ({
+        name: step.sourceName, sourceName: step.sourceName, detectorName: step.detectorName,
+        trackId: step.trackId, box: step.source, score: 1,
+      })));
+      resetMovementEvidence();
+      recognitionActive = true;
+      $('cameraEmpty').hidden = true;
+      document.body.classList.add('camera-live');
+      $('startCamera').textContent = '카메라 켜기';
+      $('arCapability').hidden = false;
+      $('arCapability').textContent = 'AR 세션 사용 후 · 화면 추적 모드';
+      $('stopCamera').disabled = false;
+      acquired.getVideoTracks().forEach((track) => track.addEventListener('ended', () => stopCamera('카메라 연결이 끝났어요.')));
+      resizeCanvas();
+      updateActionButton();
+      if (arrangement[guideIndex]) setDrawerOpen(false);
+      showGuideStep();
+      draw();
+    } catch (error) {
+      stream = null;
+      recognitionActive = false;
+      $('cameraEmpty').hidden = false;
+      document.body.classList.remove('camera-live');
+      $('emptyTitle').textContent = '카메라를 다시 연결해 주세요';
+      $('cameraMessage').textContent = 'AR 안내를 마쳤어요. 카메라를 다시 켜면 물체 추적을 이어갈 수 있어요.';
+      $('startCamera').textContent = '카메라 다시 켜기';
+      $('startCamera').disabled = false;
+      setToast(`카메라를 다시 연결하지 못했어요: ${error.message}`, true);
+      updateActionButton();
+    } finally {
+      guideCameraResumePromise = null;
+    }
+  })();
+  return guideCameraResumePromise;
 }
 
 function resizeCanvas() {
@@ -257,8 +399,9 @@ function updateCandidates(now) {
     && box.y + box.h / 2 >= activeRoiVideo.y && box.y + box.h / 2 <= activeRoiVideo.y + activeRoiVideo.h
   );
   const local = detectionState.visible(now).map((item) => ({
-    name: normalizedLabel(item.name), sourceName: normalizedLabel(item.name), score: item.score,
+    name: normalizedLabel(item.name), sourceName: normalizedLabel(item.name), detectorName: item.name, score: item.score,
     box: { x: item.x, y: item.y, w: item.w, h: item.h }, keep: true, source: 'device',
+    trackId: item.trackId, trackConfidence: item.trackConfidence, trackAmbiguous: item.trackAmbiguous,
   })).filter((item) => withinRoi(item.box));
   candidates = local.slice(0, 30);
   updateLayoutButton();
@@ -277,15 +420,20 @@ function draw() {
     const { x, y, w, h } = item.box;
     const bx = x * canvas.width; const by = y * canvas.height;
     const bw = w * canvas.width; const bh = h * canvas.height;
-    ctx.strokeStyle = item.source === 'server' ? '#d6a65a' : '#849579';
+    const activeTrack = workflowStage === 'guiding' && arrangement[guideIndex]?.trackId === item.trackId;
+    ctx.strokeStyle = activeTrack ? '#f4c66b' : item.source === 'server' ? '#d6a65a' : '#849579';
+    ctx.lineWidth = activeTrack ? Math.max(3, 4 * scale) : Math.max(2, 3 * scale);
     ctx.strokeRect(bx, by, bw, bh);
     const label = normalizedLabel(item.name);
-    const textWidth = ctx.measureText(label).width;
+    const displayLabel = activeTrack
+      ? item.trackAmbiguous ? `${label} · 확인 필요` : `${label} · 추적 중`
+      : label;
+    const textWidth = ctx.measureText(displayLabel).width;
     const labelY = Math.max(0, by - 28 * scale);
-    ctx.fillStyle = item.source === 'server' ? '#f5e4bf' : '#f3efe3';
+    ctx.fillStyle = activeTrack ? '#f4c66b' : item.source === 'server' ? '#f5e4bf' : '#f3efe3';
     ctx.fillRect(Math.max(0, bx), labelY, textWidth + 16 * scale, 25 * scale);
     ctx.fillStyle = '#303b31';
-    ctx.fillText(label, Math.max(0, bx) + 8 * scale, labelY + 18 * scale);
+    ctx.fillText(displayLabel, Math.max(0, bx) + 8 * scale, labelY + 18 * scale);
   }
   if (workflowStage === 'planning' || workflowStage === 'guiding') {
     const visiblePlan = workflowStage === 'guiding' ? arrangement[guideIndex] ? [arrangement[guideIndex]] : [] : arrangement;
@@ -424,7 +572,7 @@ function collectScanCandidates() {
     if (merged.some((item) => item.sourceName === normalizedLabel(detection.class) && overlap(item.box, box) > .38)) continue;
     merged.push({
       name: normalizedLabel(detection.class), sourceName: normalizedLabel(detection.class),
-      score: detection.score, box, keep: true, source: 'device', userEdited: false,
+      detectorName: detection.class, score: detection.score, box, keep: true, source: 'device', userEdited: false,
     });
   }
   return merged.slice(0, 30);
@@ -595,7 +743,13 @@ function makePlan() {
     const h = Math.min(region.h * .20, Math.max(region.h * .07, item.box.h));
     const x = Math.max(region.x, Math.min(region.x + region.w - w, cx - w / 2));
     const y = Math.max(region.y, Math.min(region.y + region.h - h, cy - h / 2));
-    return { name: item.name.trim(), sourceName: item.sourceName || item.name.trim(), source: { ...item.box }, target: { x, y, w, h }, index };
+    const trackId = item.trackId || `scan-${scanSessionId}-object-${index + 1}`;
+    item.trackId = trackId;
+    return {
+      name: item.name.trim(), sourceName: item.sourceName || item.name.trim(), detectorName: item.detectorName,
+      trackId,
+      source: { ...item.box }, target: { x, y, w, h }, index,
+    };
   });
   workflowStage = 'planning';
   const detail = STYLE_DETAILS[selectedStyle];
@@ -620,11 +774,15 @@ function startGuide() {
   workflowStage = 'guiding';
   recognitionActive = true;
   detectionState.clear();
+  detectionState.seed(arrangement.map((step) => ({
+    name: step.sourceName, sourceName: step.sourceName, detectorName: step.detectorName,
+    trackId: step.trackId, box: step.source, score: 1,
+  })));
   guideIndex = 0;
   skippedGuideSteps = 0;
   resetMovementEvidence();
   setView('guide');
-  setDrawerOpen(true);
+  setDrawerOpen(false);
   showGuideStep();
   updateActionButton();
   draw();
@@ -652,7 +810,11 @@ function showGuideStep() {
   $('skipMoveButton').hidden = complete;
   $('finishGuideButton').hidden = !complete;
   $('finishGuideButton').textContent = skippedGuideSteps ? '안내 종료' : '정리 완료';
+  $('startArAnchorButton').hidden = !webxrArSupported || complete || !stream;
   $('confirmMoveButton').textContent = targetDetected ? '감지된 위치 확인' : '이동 완료 확인';
+  $('drawerLabel').textContent = complete
+    ? skippedGuideSteps ? `안내 완료 · ${skippedGuideSteps}개 건너뜀 · 결과 보기` : '정리 완료 · 결과 보기'
+    : `${guideIndex + 1}/${arrangement.length} · ${step.name} 옮기는 중 · 안내 열기`;
 }
 
 function resetMovementEvidence() {
@@ -664,6 +826,7 @@ function resetMovementEvidence() {
 }
 
 function moveStatusText() {
+  if (movementEvidence?.trackAmbiguous) return '비슷한 물건이 있어 추적 대상을 확정하지 못했어요. 이동 완료를 직접 확인해 주세요.';
   if (targetDetected) return '목표 위치에서 안정적으로 감지했어요. 확인을 누르면 다음 물건으로 넘어갑니다.';
   if (movementEvidence?.targetFrames >= 2 && movementEvidence.sourceMissingFrames < 2) {
     return '목표 위치에 물체가 보여요. 원래 위치의 물체가 사라졌는지 확인하는 중입니다.';
@@ -677,7 +840,9 @@ function moveStatusText() {
 function observeCurrentMove(now) {
   const step = arrangement[guideIndex];
   if (!step || workflowStage !== 'guiding' || !movementEvidence) return;
-  const matches = candidates.filter((item) => item.keep && String(item.sourceName || item.name).trim().toLowerCase() === step.sourceName.toLowerCase());
+  const matches = candidates.filter((item) => item.keep && (step.trackId
+    ? item.trackId === step.trackId
+    : String(item.sourceName || item.name).trim().toLowerCase() === step.sourceName.toLowerCase()));
   const target = step.target;
   const sourceX = step.source.x + step.source.w / 2;
   const sourceY = step.source.y + step.source.h / 2;
@@ -701,6 +866,7 @@ function observeCurrentMove(now) {
       && cy >= target.y - .04 && cy <= target.y + target.h + .04;
   });
   const targetCandidate = targetMatches.sort((a, b) => b.score - a.score)[0];
+  movementEvidence.trackAmbiguous = Boolean(targetCandidate?.trackAmbiguous);
   if (targetCandidate) {
     const previousBox = movementEvidence.targetBox;
     const stable = previousBox && (overlap(previousBox, targetCandidate.box) >= .15
@@ -723,7 +889,10 @@ function observeCurrentMove(now) {
   }
   const targetStable = movementEvidence.targetFrames >= 3 && now - movementEvidence.targetFirstSeenAt >= 1_000;
   const sourceGone = movementEvidence.sourceMissingFrames >= 2 && now - movementEvidence.sourceMissingSince >= 500;
-  targetDetected = Boolean(targetStable && sourceGone);
+  const wasTargetDetected = targetDetected;
+  targetDetected = Boolean(targetStable && sourceGone && targetCandidate?.trackId === step.trackId
+    && !targetCandidate.trackAmbiguous && targetCandidate.trackConfidence >= .35);
+  if (targetDetected && !wasTargetDetected) setDrawerOpen(true);
   showGuideStep();
 }
 
@@ -903,9 +1072,23 @@ window.addEventListener('pointercancel', endRoiDrag);
 $('continueStyleButton').addEventListener('click', () => { setView('style'); setDrawerOpen(true); });
 $('makePlanButton').addEventListener('click', makePlan);
 $('startGuideButton').addEventListener('click', startGuide);
+$('startArAnchorButton').addEventListener('click', startArAnchorGuide);
 $('editStyleButton').addEventListener('click', () => { workflowStage = 'scanned'; setView('style'); draw(); });
-$('confirmMoveButton').addEventListener('click', () => { guideIndex++; resetMovementEvidence(); showGuideStep(); draw(); });
-$('skipMoveButton').addEventListener('click', () => { skippedGuideSteps++; guideIndex++; resetMovementEvidence(); showGuideStep(); draw(); });
+$('confirmMoveButton').addEventListener('click', () => {
+  guideIndex++;
+  resetMovementEvidence();
+  showGuideStep();
+  draw();
+  if (arrangement[guideIndex]) setDrawerOpen(false);
+});
+$('skipMoveButton').addEventListener('click', () => {
+  skippedGuideSteps++;
+  guideIndex++;
+  resetMovementEvidence();
+  showGuideStep();
+  draw();
+  if (arrangement[guideIndex]) setDrawerOpen(false);
+});
 $('finishGuideButton').addEventListener('click', () => {
   workflowStage = 'completed'; recognitionActive = false; detectionState.clear(); setView('candidates'); setDrawerOpen(false); updateActionButton();
   setToast(skippedGuideSteps

@@ -199,7 +199,15 @@ async function serveStatic(request, response, pathname) {
 const server = createServer((request, response) => {
   const url = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`);
   if (url.pathname === '/api/health') return health(response);
-  if (url.pathname === '/api/scan') return scan(request, response);
+  if (url.pathname === '/api/scan') {
+    const startedAt = Date.now();
+    const declaredBytes = Number(request.headers['content-length'] || 0);
+    response.once('finish', () => {
+      const imageBytes = Number.isFinite(declaredBytes) ? declaredBytes : 0;
+      console.log(`[scan] ${new Date().toISOString()} status=${response.statusCode} elapsedMs=${Date.now() - startedAt} imageBytes=${imageBytes}`);
+    });
+    return scan(request, response);
+  }
   return serveStatic(request, response, url.pathname);
 });
 

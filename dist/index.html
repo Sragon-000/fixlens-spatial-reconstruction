@@ -25,7 +25,13 @@
         <button id="startCamera" class="primary start-button" type="button">카메라 켜기</button>
         <p id="cameraMessage" class="camera-message">보이는 장면에서 물건 배치를 추정합니다.</p>
       </div>
+      <div id="orientationHint" class="orientation-hint" role="status" aria-live="polite">
+        <span aria-hidden="true">⟳</span>
+        <strong>휴대폰을 가로로 돌려주세요</strong>
+        <small>넓은 화면에서 공간을 스캔하고 정리 과정을 안내합니다.</small>
+      </div>
       <p id="privacyNote" class="privacy-note">선택 영역만 분석 · AI 이름 보완 이미지는 Mac 서버로 전송</p>
+      <p id="arCapability" class="ar-capability" role="status" hidden>AR 기기 지원 확인 중</p>
       <div id="scanToast" class="scan-toast" role="status" aria-live="polite" hidden></div>
       <div id="scanProgress" class="scan-progress" hidden>
         <div class="scan-progress-copy"><strong id="scanProgressTitle">선택 영역 분석</strong><span id="scanProgressValue">0 / 9 구역</span></div>
@@ -85,6 +91,7 @@
           <h2 id="guideObjectName" class="guide-object-name">물건</h2>
           <p id="guideInstruction" class="panel-copy"></p>
           <div id="moveStatus" class="move-status" role="status">이동을 감지하는 중이에요.</div>
+          <button id="startArAnchorButton" class="quiet-button wide" type="button" hidden>AR 위치 고정 테스트</button>
           <button id="confirmMoveButton" class="primary wide" type="button">이동 완료 확인</button>
           <button id="skipMoveButton" class="quiet-button" type="button">이 물건 건너뛰기</button>
           <button id="finishGuideButton" class="primary wide" type="button" hidden>정리 완료</button>
@@ -92,6 +99,11 @@
       </div>
     </section>
   </main>
+  <canvas id="arCanvas" class="ar-render-canvas" aria-hidden="true"></canvas>
+  <div id="arOverlay" class="xr-overlay" hidden>
+    <p id="arOverlayMessage" role="status">책상 위에서 목표 위치를 탭해 고정하세요.</p>
+    <button id="arExitButton" type="button" aria-label="AR 종료" title="AR 종료">×</button>
+  </div>
   <script type="module" src="./app.mjs"></script>
 </body>
 </html>

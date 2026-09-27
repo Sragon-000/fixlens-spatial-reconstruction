@@ -13,7 +13,7 @@ while true; do
   cat <<'MENU'
 FixLens 서버 관리
 ────────────────────────
-1) 서버 시작 (Ollama + 웹)
+1) 서버 시작 + 휴대폰 QR 열기 (Ollama + 웹 + HTTPS 터널)
 2) 관리자가 시작한 서버 종료
 3) 상태 확인
 4) 휴대폰용 HTTPS 터널 시작
