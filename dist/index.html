@@ -30,8 +30,6 @@
         <strong>휴대폰을 가로로 돌려주세요</strong>
         <small>넓은 화면에서 공간을 스캔하고 정리 과정을 안내합니다.</small>
       </div>
-      <p id="privacyNote" class="privacy-note">선택 영역만 분석 · AI 이름 보완 이미지는 Mac 서버로 전송</p>
-      <p id="arCapability" class="ar-capability" role="status" hidden>AR 기기 지원 확인 중</p>
       <div id="scanToast" class="scan-toast" role="status" aria-live="polite" hidden></div>
       <div id="scanProgress" class="scan-progress" hidden>
         <div class="scan-progress-copy"><strong id="scanProgressTitle">선택 영역 분석</strong><span id="scanProgressValue">0 / 9 구역</span></div>
@@ -45,12 +43,16 @@
         <button class="roi-handle roi-handle-sw" type="button" data-handle="sw" aria-label="왼쪽 아래 영역 조절"></button>
         <button class="roi-handle roi-handle-se" type="button" data-handle="se" aria-label="오른쪽 아래 영역 조절"></button>
       </div>
+    </section>
+    <aside id="cameraControls" class="camera-controls" aria-label="카메라 제어">
+      <p id="privacyNote" class="privacy-note">선택 영역만 분석 · AI 이름 보완 이미지는 Mac 서버로 전송</p>
+      <p id="arCapability" class="ar-capability" role="status" hidden>AR 기기 지원 확인 중</p>
       <div class="camera-toolbar">
         <button id="stopCamera" class="icon-button" type="button" disabled aria-label="카메라 끄기" title="카메라 끄기">끄기</button>
         <button id="scanButton" class="scan-button" type="button" disabled aria-pressed="false"><span class="memory-mark" aria-hidden="true">⌖</span><span>공간 스캔 시작</span></button>
         <select id="facing" class="facing-select" aria-label="카메라 방향"><option value="environment">후면</option><option value="user">전면</option></select>
       </div>
-    </section>
+    </aside>
     <section id="drawer" class="drawer" aria-label="공간 재구성 결과">
       <button id="drawerHandle" class="drawer-handle" type="button" aria-expanded="false" aria-controls="drawerBody">
         <span id="drawerLabel">배치도 · 스캔 전</span>

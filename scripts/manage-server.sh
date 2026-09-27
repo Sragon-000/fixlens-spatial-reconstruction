@@ -163,11 +163,41 @@ show_tunnel_qr() {
   open "$QR_IMAGE"
 }
 
+tunnel_health() {
+  local url="$1" hostname ip resolver
+  if curl -fsS --max-time 3 "$url/api/health" >/dev/null 2>&1; then return 0; fi
+  command -v dig >/dev/null 2>&1 || return 1
+  hostname="${url#https://}"
+  hostname="${hostname%%/*}"
+  for resolver in 1.1.1.1 8.8.8.8; do
+    ip="$(dig +time=2 +tries=1 +short "@$resolver" "$hostname" A | awk '/^[0-9.]+$/ { print; exit }')"
+    [[ -n "$ip" ]] || continue
+    if curl -fsS --max-time 4 --resolve "$hostname:443:$ip" "$url/api/health" >/dev/null 2>&1; then return 0; fi
+  done
+  return 1
+}
+
+wait_for_tunnel() {
+  local url="$1" attempts="${2:-30}"
+  for ((i=0; i<attempts; i++)); do
+    managed_pid_matches "$TUNNEL_PID" 'cloudflared tunnel --url http://127.0.0.1:4173' || return 1
+    if tunnel_health "$url"; then return 0; fi
+    sleep 1
+  done
+  return 1
+}
+
 start_tunnel() {
   if managed_pid_matches "$TUNNEL_PID" 'cloudflared tunnel --url http://127.0.0.1:4173'; then
-    printf 'HTTPS 터널이 이미 실행 중입니다.\n'
-    show_tunnel_qr
-    return $?
+    local current_url
+    current_url="$(grep -Eo 'https://[[:alnum:]-]+\.trycloudflare\.com' "$RUN_DIR/tunnel.log" 2>/dev/null | tail -1 || true)"
+    if [[ -n "$current_url" ]] && wait_for_tunnel "$current_url" 8; then
+      printf 'HTTPS 터널 연결을 확인했습니다.\n'
+      show_tunnel_qr
+      return $?
+    fi
+    printf '기존 HTTPS 터널에 연결할 수 없어 새 주소로 다시 시작합니다.\n'
+    stop_process 'HTTPS 터널' "$TUNNEL_PID" 'cloudflared tunnel --url http://127.0.0.1:4173'
   fi
   if ! service_responds "$WEB_URL/api/health"; then
     printf '먼저 FixLens 웹 서버를 시작하세요.\n'
@@ -181,13 +211,18 @@ start_tunnel() {
   fi
   : >"$RUN_DIR/tunnel.log"
   start_process '임시 HTTPS 터널' "$TUNNEL_PID" "$RUN_DIR/tunnel.log" "$tunnel_bin" tunnel --url "$WEB_URL"
-  for _ in {1..15}; do
+  for _ in {1..30}; do
     local url
     url="$(grep -Eo 'https://[[:alnum:]-]+\.trycloudflare\.com' "$RUN_DIR/tunnel.log" | tail -1 || true)"
     if [[ -n "$url" ]]; then
       printf '휴대폰에서 열 HTTPS 주소: %s\n' "$url"
-      show_tunnel_qr
-      return $?
+      printf '외부 접속을 확인하는 중입니다.\n'
+      if wait_for_tunnel "$url" 30; then
+        show_tunnel_qr
+        return $?
+      fi
+      printf '터널 주소는 발급됐지만 웹 서버에 연결되지 않습니다. cloudflared 로그를 확인하세요: %s\n' "$RUN_DIR/tunnel.log"
+      return 1
     fi
     sleep 1
   done
@@ -206,7 +241,15 @@ show_status() {
   fi
   printf '관리자 HTTPS 터널: '
   if managed_pid_matches "$TUNNEL_PID" 'cloudflared tunnel --url http://127.0.0.1:4173'; then
-    grep -Eo 'https://[[:alnum:]-]+\.trycloudflare\.com' "$RUN_DIR/tunnel.log" | tail -1 || printf '시작 중\n'
+    local tunnel_url
+    tunnel_url="$(grep -Eo 'https://[[:alnum:]-]+\.trycloudflare\.com' "$RUN_DIR/tunnel.log" | tail -1 || true)"
+    if [[ -n "$tunnel_url" ]] && tunnel_health "$tunnel_url"; then
+      printf '%s (접속 확인됨)\n' "$tunnel_url"
+    elif [[ -n "$tunnel_url" ]]; then
+      printf '%s (외부 연결 확인 중/실패)\n' "$tunnel_url"
+    else
+      printf '시작 중\n'
+    fi
   else
     printf '꺼짐\n'
   fi

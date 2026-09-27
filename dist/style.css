@@ -42,6 +42,39 @@ html:fullscreen .topbar{display:none}html:fullscreen .camera-layout{height:100sv
 @media(orientation:landscape) and (max-height:700px) and (min-width:800px){.camera-layout{height:calc(100svh - 60px)}}
 @media(orientation:landscape) and (max-height:560px){.camera-layout{height:calc(100svh - 44px)}}
 @media(orientation:landscape) and (max-height:700px) and (max-width:560px){.camera-layout{--left-rail:72px;--right-rail:152px}.camera-toolbar{gap:6px;padding:6px}.camera-toolbar .scan-button{gap:4px;padding:0 4px;font-size:10px}.drawer-handle{gap:5px;padding:5px 7px;font-size:10px}.drawer.open .drawer-body{padding-right:7px;padding-left:7px}}
+
+/* Keep camera controls outside the live image and reserve the object list for scrolling. */
+.camera-controls{position:absolute;inset:0;z-index:10;pointer-events:none}
+.camera-controls .camera-toolbar,.camera-controls .privacy-note,.camera-controls .ar-capability{pointer-events:auto}
+.camera-controls .privacy-note{left:50%;top:13px;transform:translateX(-50%)}
+.camera-controls .ar-capability{top:48px}
+.drawer.open{display:flex;flex-direction:column}
+.drawer.open .drawer-body{min-height:0;height:calc(52svh - 37px)}
+#candidateSection{display:flex;flex:1;min-height:0;flex-direction:column;overflow:hidden}
+#candidateSection .section-title,#candidateSection .panel-copy,#candidateSection .tile-summary,#candidateSection .quiet-button,#candidateSection .wide{flex:none}
+#candidateSection .objects{flex:1 1 0;min-height:48px;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+#styleSection,#planSection,#guideSection{min-height:0}
+#planSection{display:flex;flex:1;flex-direction:column;overflow:hidden}
+#planSection .section-title,#planSection .panel-copy,#planSection .wide,#planSection .quiet-button{flex:none}
+#planSteps{flex:1;min-height:48px;max-height:none;overscroll-behavior:contain}
+@media(orientation:landscape) and (max-height:700px){
+  .camera-layout{--left-rail:clamp(150px,18vw,220px);--right-rail:clamp(250px,27vw,340px)}
+  .camera-controls{inset:0 auto 0 8px;width:var(--left-rail);display:flex;flex-direction:column;justify-content:center;gap:8px}
+  .camera-controls .privacy-note,.camera-controls .ar-capability{position:static;max-width:100%;margin:0;padding:7px 9px;transform:none;border:1px solid #d9d4c8;border-radius:12px;background:#f5f1e7ed;color:#455343;font-size:9px;line-height:1.35;text-align:left;white-space:normal;box-shadow:0 3px 12px #20292018;backdrop-filter:blur(12px)}
+  .camera-controls .camera-toolbar{position:static;transform:none;width:100%;display:flex;flex-direction:column;align-items:stretch;gap:8px;padding:10px;border:1px solid #d9d4c8;border-radius:16px;background:#f5f1e7ed;box-shadow:0 6px 22px #20292020;backdrop-filter:blur(12px)}
+  .camera-controls .camera-toolbar .scan-button,.camera-controls .camera-toolbar .icon-button,.camera-controls .camera-toolbar .facing-select{width:100%;max-width:none;min-height:40px;flex:none}
+  .camera-controls .camera-toolbar .scan-button{padding:0 8px;font-size:11px}
+  .camera-controls .camera-toolbar .scan-button .memory-mark{width:19px;height:19px;font-size:14px}
+  .drawer.open .drawer-body{height:auto;max-height:calc(100svh - 56px);flex:1;overflow:hidden}
+}
+@media(orientation:landscape) and (max-height:700px) and (max-width:560px){
+  .camera-layout{--left-rail:104px;--right-rail:176px}
+  .camera-controls{gap:5px}
+  .camera-controls .privacy-note,.camera-controls .ar-capability{padding:5px 6px;font-size:8px}
+  .camera-controls .camera-toolbar{gap:5px;padding:6px}
+  .camera-controls .camera-toolbar .scan-button{gap:4px;padding:0 4px;font-size:9px}
+  .camera-controls .camera-toolbar .icon-button,.camera-controls .camera-toolbar .facing-select,.camera-controls .camera-toolbar .scan-button{min-height:34px}
+}
 .guide-progress-track{height:6px;margin:5px 0 3px;overflow:hidden;border-radius:999px;background:#dce1d5}.guide-progress-track span{display:block;width:0;height:100%;border-radius:inherit;background:#738769;transition:width .2s ease}.guide-progress-text{margin:0 1px 8px;color:#657064;font-size:10px;font-variant-numeric:tabular-nums;text-align:right}
 .ar-capability{position:absolute;z-index:5;top:48px;right:12px;max-width:min(260px,calc(100% - 24px));margin:0;padding:7px 10px;border:1px solid #d9d4c8;border-radius:999px;background:#f5f1e7e8;color:#455343;font-size:10px;line-height:1.3;text-align:center;box-shadow:0 2px 12px #20292018;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
 .ar-render-canvas{position:fixed;left:-2px;top:-2px;width:1px;height:1px;opacity:0;pointer-events:none}.xr-overlay{position:fixed;inset:0;z-index:1000;pointer-events:none}.xr-overlay p,.xr-overlay button{position:absolute;margin:0;border:1px solid #e7e2d8;border-radius:14px;background:#f5f1e7d9;color:#354233;line-height:1.35;text-align:center;box-shadow:0 3px 12px #20292024;pointer-events:auto;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}.xr-overlay p{top:calc(12px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);max-width:calc(100% - 82px);padding:8px 11px;font-size:11px;transition:opacity .25s,transform .25s}.xr-overlay.hud-quiet p{opacity:0;transform:translate(-50%,-8px);pointer-events:none}.xr-overlay button{top:calc(10px + env(safe-area-inset-top));right:10px;display:grid;place-items:center;width:42px;height:42px;min-height:42px;padding:0;border-color:#e7e2d8;border-radius:50%;background:#f5f1e7ed;color:#354233;font-size:21px;line-height:1;font-weight:600}
