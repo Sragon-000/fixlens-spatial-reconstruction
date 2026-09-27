@@ -18,18 +18,26 @@
     <section id="stage" class="stage" aria-label="공간 카메라 화면">
       <video id="video" autoplay muted playsinline></video>
       <canvas id="canvas" aria-label="인식된 공간 요소 위치"></canvas>
+      <p id="roiHint" class="roi-hint" hidden>사각형 안에 스캔할 곳을 맞춘 다음 시작하세요.</p>
       <div id="cameraEmpty" class="camera-empty">
         <span class="camera-glyph" aria-hidden="true">⌂</span>
         <strong id="emptyTitle">공간을 비춰주세요</strong>
         <button id="startCamera" class="primary start-button" type="button">카메라 켜기</button>
         <p id="cameraMessage" class="camera-message">보이는 장면에서 물건 배치를 추정합니다.</p>
       </div>
-      <p id="privacyNote" class="privacy-note">실시간 물체 감지는 기기에서 실행 · AI 이름 보완용 장면은 Mac 서버로 전송</p>
+      <p id="privacyNote" class="privacy-note">선택 영역만 분석 · AI 이름 보완 이미지는 Mac 서버로 전송</p>
       <div id="scanToast" class="scan-toast" role="status" aria-live="polite" hidden></div>
       <div id="scanProgress" class="scan-progress" hidden>
-        <div class="scan-progress-copy"><strong id="scanProgressTitle">책상 스캔 중</strong><span id="scanProgressValue">0%</span></div>
+        <div class="scan-progress-copy"><strong id="scanProgressTitle">선택 영역 분석</strong><span id="scanProgressValue">0 / 9 구역</span></div>
         <div class="scan-progress-track"><span id="scanProgressBar"></span></div>
-        <p id="scanProgressHint">카메라를 고정하고 물체가 보이도록 해주세요.</p>
+        <p id="scanProgressHint">카메라와 책상을 고정해 주세요.</p>
+      </div>
+      <div id="roiSelection" class="roi-selection" role="group" aria-label="스캔할 영역 선택" hidden>
+        <span class="roi-label">스캔 영역 · 안쪽으로 끌어 조정</span>
+        <button class="roi-handle roi-handle-nw" type="button" data-handle="nw" aria-label="왼쪽 위 영역 조절"></button>
+        <button class="roi-handle roi-handle-ne" type="button" data-handle="ne" aria-label="오른쪽 위 영역 조절"></button>
+        <button class="roi-handle roi-handle-sw" type="button" data-handle="sw" aria-label="왼쪽 아래 영역 조절"></button>
+        <button class="roi-handle roi-handle-se" type="button" data-handle="se" aria-label="오른쪽 아래 영역 조절"></button>
       </div>
       <div class="camera-toolbar">
         <button id="stopCamera" class="icon-button" type="button" disabled aria-label="카메라 끄기" title="카메라 끄기">끄기</button>
@@ -46,7 +54,10 @@
         <section id="candidateSection" class="drawer-section">
           <p class="section-title">인식한 물건 <span id="candidateCount">0</span></p>
           <p id="scanSummary" class="panel-copy">책상 전체가 보이게 카메라를 고정하고 스캔을 시작해요.</p>
+          <div id="scanTileSummary" class="tile-summary" hidden></div>
           <ul id="candidates" class="objects"><li class="empty-result">카메라에 물체를 비추면 윤곽을 표시해요.</li></ul>
+          <button id="retryTilesButton" class="quiet-button" type="button" hidden>실패한 구역 다시 분석</button>
+          <button id="editRegionButton" class="quiet-button" type="button" hidden>스캔 영역 다시 지정</button>
           <button id="continueStyleButton" class="primary wide" type="button" disabled>정리 스타일 고르기</button>
         </section>
         <section id="styleSection" class="drawer-section" hidden>
@@ -67,6 +78,10 @@
         </section>
         <section id="guideSection" class="drawer-section" hidden>
           <p id="guideStepCount" class="section-title">1 / 1</p>
+          <div id="guideProgressTrack" class="guide-progress-track" role="progressbar" aria-label="정리 안내 진행률" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <span id="guideProgressBar"></span>
+          </div>
+          <p id="guideProgressText" class="guide-progress-text">진행 0 / 0</p>
           <h2 id="guideObjectName" class="guide-object-name">물건</h2>
           <p id="guideInstruction" class="panel-copy"></p>
           <div id="moveStatus" class="move-status" role="status">이동을 감지하는 중이에요.</div>

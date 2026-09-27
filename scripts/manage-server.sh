@@ -10,7 +10,9 @@ OLLAMA_PID="$RUN_DIR/ollama.pid"
 TUNNEL_PID="$RUN_DIR/tunnel.pid"
 WEB_URL="http://127.0.0.1:4173"
 OLLAMA_URL="http://127.0.0.1:11434"
-MODEL="qwen3.5:0.8b"
+MODEL="qwen3.5:4b"
+QR_SCRIPT="$ROOT/scripts/generate-qr.mjs"
+QR_IMAGE="$RUN_DIR/phone-access-qr.png"
 
 mkdir -p "$RUN_DIR"
 
@@ -137,11 +139,32 @@ start_all() {
   fi
 }
 
+show_tunnel_qr() {
+  local url
+  url="$(grep -Eo 'https://[[:alnum:]-]+\.trycloudflare\.com' "$RUN_DIR/tunnel.log" 2>/dev/null | tail -1 || true)"
+  if [[ -z "$url" ]]; then
+    printf '실행 중인 HTTPS 주소가 없습니다. 먼저 휴대폰용 HTTPS 터널을 시작하세요.\n'
+    return 1
+  fi
+  local node_bin
+  node_bin="$(find_bin node)"
+  if [[ -z "$node_bin" ]]; then
+    printf 'Node.js를 찾지 못했습니다. 휴대폰에서 직접 열 주소: %s\n' "$url"
+    return 1
+  fi
+  if ! "$node_bin" "$QR_SCRIPT" "$url" "$QR_IMAGE"; then
+    printf 'QR 이미지를 만들지 못했습니다. 휴대폰에서 직접 열 주소: %s\n' "$url"
+    return 1
+  fi
+  printf '휴대폰 접속 QR을 열었습니다: %s\n주소: %s\n' "$QR_IMAGE" "$url"
+  open "$QR_IMAGE"
+}
+
 start_tunnel() {
   if managed_pid_matches "$TUNNEL_PID" 'cloudflared tunnel --url http://127.0.0.1:4173'; then
     printf 'HTTPS 터널이 이미 실행 중입니다.\n'
-    grep -Eo 'https://[[:alnum:]-]+\.trycloudflare\.com' "$RUN_DIR/tunnel.log" | tail -1 || true
-    return 0
+    show_tunnel_qr
+    return $?
   fi
   if ! service_responds "$WEB_URL/api/health"; then
     printf '먼저 FixLens 웹 서버를 시작하세요.\n'
@@ -160,7 +183,8 @@ start_tunnel() {
     url="$(grep -Eo 'https://[[:alnum:]-]+\.trycloudflare\.com' "$RUN_DIR/tunnel.log" | tail -1 || true)"
     if [[ -n "$url" ]]; then
       printf '휴대폰에서 열 HTTPS 주소: %s\n' "$url"
-      return 0
+      show_tunnel_qr
+      return $?
     fi
     sleep 1
   done
@@ -194,6 +218,7 @@ case "${1:-status}" in
     stop_process '관리자가 시작한 Ollama' "$OLLAMA_PID" 'ollama serve'
     ;;
   tunnel-start) start_tunnel ;;
+  tunnel-qr) show_tunnel_qr ;;
   tunnel-stop) stop_process 'HTTPS 터널' "$TUNNEL_PID" 'cloudflared tunnel --url http://127.0.0.1:4173' ;;
   status) show_status ;;
   open) open "$WEB_URL" ;;

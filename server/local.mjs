@@ -7,7 +7,7 @@ const ROOT = resolve(fileURLToPath(new URL('../dist/', import.meta.url)));
 const HOST = process.env.FIXLENS_HOST || '127.0.0.1';
 const PORT = Number(process.env.PORT || 4173);
 const OLLAMA_URL = (process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/$/, '');
-const MODEL = process.env.OLLAMA_MODEL || 'qwen3.5:0.8b';
+const MODEL = process.env.OLLAMA_MODEL || 'qwen3.5:4b';
 const MAX_IMAGE_BYTES = 2_000_000;
 const MAX_REQUESTS_PER_MINUTE = 15;
 const windows = new Map();
@@ -135,7 +135,7 @@ async function scan(request, response) {
   try {
     const started = Date.now();
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 70_000);
+    const timer = setTimeout(() => controller.abort(), 120_000);
     let result;
     try {
       result = await fetch(`${OLLAMA_URL}/api/chat`, {
@@ -143,10 +143,10 @@ async function scan(request, response) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           model: MODEL, stream: false, think: false, format: SCHEMA,
-          options: { temperature: 0.1 },
-          messages: [{
-            role: 'user', images: [image.toString('base64')],
-            content: `이미지 한 장에서 실제로 보이는 일상 물건을 찾아주세요. 전체 화면 기준 상대 위치를 0부터 1 사이 값으로 추정하고, 각 물건의 상자 좌표 x(왼쪽), y(위쪽), w(너비), h(높이)를 반환하세요. 가능하면 한국어의 짧은 이름을 쓰세요. 흐릿하거나 보이지 않는 물건을 지어내지 마세요. 물건 후보는 최대 12개이며, 정답처럼 단정하지 말고 score는 추정 확실도입니다. 이 결과는 물체별 정확한 추적이나 정밀한 3D 위치가 아니라 사진을 바탕으로 한 참고 추정치입니다. 요청한 JSON 형식만 반환하세요. 이미지 크기는 ${width}×${height}입니다.`,
+            options: { temperature: 0.05, num_ctx: 8192 },
+            messages: [{
+              role: 'user', images: [image.toString('base64')],
+            content: `이 장면은 정리 안내를 만들기 위한 물건 목록입니다. 이미지를 전체와 작은 구역 순서로 꼼꼼히 살펴보고, 실제로 보이는 독립된 물건만 찾으세요. 먼저 물건의 종류와 개수를 세고, 마지막에 빠뜨린 물건·중복 항목·잘못된 상자를 다시 확인하세요. 물체마다 가장 구체적이면서도 확실한 짧은 한국어 이름을 쓰세요(예: 전자기기라고만 하지 말고 키보드처럼 구체적으로). 불확실하면 더 일반적인 이름을 쓰고, 일부만 보이거나 흐릿해 식별할 수 없는 것은 추측하지 마세요. 작은 부속품도 명확히 보이면 포함하되 그림자나 인쇄된 그림은 물건으로 세지 마세요. 각 물체의 상자 좌표는 이미지 전체 기준 0~1의 x(왼쪽), y(위쪽), w(너비), h(높이)입니다. 상자는 물체 외곽에 가깝게 잡고, 같은 물체를 중복 반환하지 마세요. 최대 12개까지만 반환하세요. score는 확신도이며, 낮은 확신의 후보는 생략하세요. JSON 외의 텍스트를 반환하지 마세요. 이미지 크기는 ${width}×${height}입니다.`,
           }],
         }),
       });

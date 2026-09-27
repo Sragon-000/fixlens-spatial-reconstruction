@@ -20,6 +20,7 @@ FixLens 서버 관리
 5) HTTPS 터널 종료
 6) 로컬 화면 열기
 7) 로그 보기
+8) 휴대폰 접속 QR 열기
 q) 종료
 MENU
   read -r -p '선택: ' choice
@@ -32,6 +33,7 @@ MENU
     5) "$MANAGER" tunnel-stop; pause_menu ;;
     6) "$MANAGER" open; pause_menu ;;
     7) "$MANAGER" logs; pause_menu ;;
+    8) "$MANAGER" tunnel-qr; pause_menu ;;
     q|Q) exit 0 ;;
     *) printf '메뉴에 있는 번호를 입력하세요.\n'; pause_menu ;;
   esac
