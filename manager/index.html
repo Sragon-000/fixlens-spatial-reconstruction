@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f4ef">
+  <title>FixLens · 서버 관리</title>
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="FixLens 서버 관리"><span class="brand-icon" aria-hidden="true">F</span><span>FixLens</span></a>
+      <span class="local-pill"><i></i> 이 Mac에서만 관리</span>
+    </header>
+
+    <section class="intro">
+      <div>
+        <p class="eyebrow">LOCAL CONTROL CENTER</p>
+        <h1>서버 관리</h1>
+        <p class="intro-copy">서버 상태를 확인하고 휴대폰 접속 QR을 바로 열어보세요.</p>
+      </div>
+      <button id="refreshButton" class="icon-action" type="button" aria-label="상태 새로고침" title="상태 새로고침">↻</button>
+    </section>
+
+    <section class="quick-actions" aria-label="전체 서버 작업">
+      <button id="startAllButton" class="button primary" type="button"><span aria-hidden="true">▶</span> 전체 시작</button>
+      <button id="stopAllButton" class="button secondary" type="button"><span aria-hidden="true">■</span> 전체 종료</button>
+      <span id="lastUpdated" class="updated-label">상태 확인 중…</span>
+    </section>
+
+    <section class="content-grid">
+      <div class="service-list" aria-label="서비스 상태">
+        <article class="service-card" data-service="web">
+          <div class="service-icon web-icon" aria-hidden="true">▧</div>
+          <div class="service-main">
+            <div class="service-heading"><h2>FixLens 웹 서버</h2><span id="webBadge" class="status-badge">확인 중</span></div>
+            <p id="webDescription" class="service-description">카메라 화면과 분석 API를 제공합니다.</p>
+            <div class="service-actions">
+              <button class="small-button" data-action="web-start" type="button">시작</button>
+              <button class="small-button quiet" data-action="web-stop" data-stop-service="web" type="button">종료</button>
+              <a class="text-link" href="http://127.0.0.1:4173/" target="_blank" rel="noreferrer">앱 열기 ↗</a>
+            </div>
+          </div>
+        </article>
+
+        <article class="service-card" data-service="ollama">
+          <div class="service-icon ai-icon" aria-hidden="true">✳</div>
+          <div class="service-main">
+            <div class="service-heading"><h2>Ollama AI</h2><span id="ollamaBadge" class="status-badge">확인 중</span></div>
+            <p id="ollamaDescription" class="service-description">물체 분석과 AI 배치안을 생성합니다.</p>
+            <div class="service-actions">
+              <button class="small-button" data-action="ollama-start" type="button">시작</button>
+              <button class="small-button quiet" data-action="ollama-stop" data-stop-service="ollama" type="button">종료</button>
+            </div>
+          </div>
+        </article>
+
+        <article class="service-card" data-service="tunnel">
+          <div class="service-icon tunnel-icon" aria-hidden="true">⌁</div>
+          <div class="service-main">
+            <div class="service-heading"><h2>휴대폰 연결</h2><span id="tunnelBadge" class="status-badge">확인 중</span></div>
+            <p id="tunnelDescription" class="service-description">HTTPS 터널을 통해 QR로 접속합니다.</p>
+            <div class="service-actions">
+              <button class="small-button" data-action="tunnel-start" type="button">터널 시작</button>
+              <button class="small-button quiet" data-action="tunnel-stop" data-stop-service="tunnel" type="button">종료</button>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <aside class="qr-card" aria-labelledby="qrHeading">
+        <div class="qr-heading-row"><div><p class="eyebrow">PHONE ACCESS</p><h2 id="qrHeading">휴대폰 접속</h2></div><span id="qrState" class="qr-state">터널을 시작해 주세요</span></div>
+        <div id="qrPlaceholder" class="qr-placeholder"><span aria-hidden="true">▦</span><p>터널이 연결되면<br>QR이 여기에 표시됩니다.</p></div>
+        <img id="qrImage" class="qr-image" alt="휴대폰 FixLens 접속 QR 코드" hidden>
+        <a id="phoneUrl" class="phone-url" href="#" target="_blank" rel="noreferrer" hidden></a>
+        <button id="copyUrlButton" class="button qr-copy" type="button" disabled>주소 복사</button>
+        <p class="qr-note">QR은 휴대폰에서 FixLens를 여는 용도입니다.<br>서버 관리 기능은 Mac에서만 열립니다.</p>
+      </aside>
+    </section>
+
+    <section class="clients-panel" aria-labelledby="clientsHeading">
+      <div class="clients-heading">
+        <div><p class="eyebrow">LIVE ACTIVITY</p><h2 id="clientsHeading">접속 기기와 진행 중인 작업</h2></div>
+        <span id="clientCount" class="client-count">확인 중</span>
+      </div>
+      <p class="clients-note">FixLens를 열어 둔 브라우저가 상태를 보내는 동안 표시됩니다. 휴대폰 브라우저가 백그라운드에 있으면 목록에서 잠시 사라질 수 있어요.</p>
+      <div id="clientsList" class="clients-list" aria-live="polite">
+        <p class="clients-empty">접속 기기를 확인하고 있어요…</p>
+      </div>
+    </section>
+
+    <section id="notice" class="notice" role="status" aria-live="polite" hidden></section>
+
+    <details class="logs-panel">
+      <summary>최근 로그</summary>
+      <div class="log-grid">
+        <section><h3>웹 서버</h3><pre id="webLog">로그 없음</pre></section>
+        <section><h3>Ollama</h3><pre id="ollamaLog">로그 없음</pre></section>
+        <section><h3>HTTPS 터널</h3><pre id="tunnelLog">로그 없음</pre></section>
+      </div>
+    </details>
+
+    <footer>관리 서버는 <code>127.0.0.1:4174</code>에서 실행되며 외부 네트워크에 공개되지 않습니다.</footer>
+  </main>
+</body>
+</html>

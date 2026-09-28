@@ -8,8 +8,10 @@ RUN_DIR="$ROOT/.run"
 WEB_PID="$RUN_DIR/web.pid"
 OLLAMA_PID="$RUN_DIR/ollama.pid"
 TUNNEL_PID="$RUN_DIR/tunnel.pid"
+MANAGER_PID="$RUN_DIR/manager.pid"
 WEB_URL="http://127.0.0.1:4173"
 OLLAMA_URL="http://127.0.0.1:11434"
+MANAGER_URL="http://127.0.0.1:4174"
 MODEL="qwen3.5:4b"
 QR_SCRIPT="$ROOT/scripts/generate-qr.mjs"
 QR_IMAGE="$RUN_DIR/phone-access-qr.png"
@@ -160,7 +162,36 @@ show_tunnel_qr() {
     return 1
   fi
   printf '휴대폰 접속 QR을 열었습니다: %s\n주소: %s\n' "$QR_IMAGE" "$url"
-  open "$QR_IMAGE"
+  if [[ "${FIXLENS_OPEN_QR:-1}" == "1" ]]; then open "$QR_IMAGE"; fi
+}
+
+start_manager() {
+  if service_responds "$MANAGER_URL/api/status"; then
+    printf 'FixLens 웹 관리자가 이미 실행 중입니다.\n'
+    return 0
+  fi
+  local node_bin
+  node_bin="$(find_bin node)"
+  if [[ -z "$node_bin" ]]; then
+    printf 'Node.js를 찾지 못했습니다. Node.js 20 이상을 설치하세요.\n'
+    return 1
+  fi
+  if managed_pid_matches "$MANAGER_PID" 'server/manager.mjs'; then
+    printf 'FixLens 웹 관리자가 시작되는 중입니다.\n'
+  else
+    start_process 'FixLens 웹 관리자' "$MANAGER_PID" "$RUN_DIR/manager.log" "$node_bin" "$ROOT/server/manager.mjs"
+  fi
+  if wait_for_service "$MANAGER_URL/api/status" 10; then
+    printf 'FixLens 웹 관리자를 사용할 수 있습니다: %s\n' "$MANAGER_URL"
+  else
+    printf '웹 관리자가 응답하지 않습니다. 로그를 확인하세요: %s\n' "$RUN_DIR/manager.log"
+    return 1
+  fi
+}
+
+open_dashboard() {
+  start_manager || return 1
+  open "$MANAGER_URL"
 }
 
 tunnel_health() {
@@ -257,12 +288,20 @@ show_status() {
 }
 
 case "${1:-status}" in
+  dashboard) open_dashboard ;;
+  manager-start) start_manager ;;
   start) start_all ;;
   stop)
     stop_process 'HTTPS 터널' "$TUNNEL_PID" 'cloudflared tunnel --url http://127.0.0.1:4173'
     stop_process 'FixLens 웹 서버' "$WEB_PID" 'server/local.mjs'
     stop_process '관리자가 시작한 Ollama' "$OLLAMA_PID" 'ollama serve'
     ;;
+  web-start) start_web ;;
+  web-stop)
+    stop_process 'FixLens 웹 서버' "$WEB_PID" 'server/local.mjs'
+    ;;
+  ollama-start) start_ollama ;;
+  ollama-stop) stop_process '관리자가 시작한 Ollama' "$OLLAMA_PID" 'ollama serve' ;;
   tunnel-start) start_tunnel ;;
   tunnel-qr) show_tunnel_qr ;;
   tunnel-stop) stop_process 'HTTPS 터널' "$TUNNEL_PID" 'cloudflared tunnel --url http://127.0.0.1:4173' ;;
@@ -271,5 +310,5 @@ case "${1:-status}" in
   logs)
     tail -n 40 "$RUN_DIR/web.log" "$RUN_DIR/ollama.log" "$RUN_DIR/tunnel.log" 2>/dev/null || true
     ;;
-  *) printf '사용법: %s {start|stop|tunnel-start|tunnel-stop|status|open|logs}\n' "$0"; exit 2 ;;
+  *) printf '사용법: %s {dashboard|manager-start|start|stop|web-start|web-stop|ollama-start|ollama-stop|tunnel-start|tunnel-stop|status|open|logs}\n' "$0"; exit 2 ;;
 esac

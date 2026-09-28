@@ -57,6 +57,7 @@ html:fullscreen .topbar{display:none}html:fullscreen .camera-layout{height:100sv
 #planSection{display:flex;flex:1;flex-direction:column;overflow:hidden}
 #planSection .section-title,#planSection .panel-copy,#planSection .wide,#planSection .quiet-button{flex:none}
 #planSteps{flex:1;min-height:48px;max-height:none;overscroll-behavior:contain}
+.scan-toast{top:10px;right:10px;left:auto;transform:none;width:max-content;max-width:min(280px,calc(100% - 20px));padding:7px 9px;border-radius:10px;font-size:10px;line-height:1.35;text-align:left;pointer-events:none}
 @media(orientation:landscape) and (max-height:700px){
   .camera-layout{--left-rail:clamp(150px,18vw,220px);--right-rail:clamp(250px,27vw,340px)}
   .camera-controls{inset:0 auto 0 8px;width:var(--left-rail);display:flex;flex-direction:column;justify-content:center;gap:8px}

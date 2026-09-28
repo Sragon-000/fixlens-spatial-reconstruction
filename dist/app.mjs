@@ -26,6 +26,16 @@ const SERVER_MAX_WIDTH = 960;
 const SCAN_COLUMNS = 3;
 const SCAN_ROWS = 3;
 const SCAN_TILE_COUNT = SCAN_COLUMNS * SCAN_ROWS;
+const PRESENCE_CLIENT_ID = (() => {
+  try {
+    const key = 'fixlens.presence-client';
+    const existing = sessionStorage.getItem(key);
+    if (existing) return existing;
+    const created = crypto.randomUUID?.() || `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    sessionStorage.setItem(key, created);
+    return created;
+  } catch { return `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`; }
+})();
 
 let stream = null;
 let fullscreenRequestedByApp = false;
@@ -56,6 +66,23 @@ let skippedGuideSteps = 0;
 let targetDetected = false;
 let movementEvidence = null;
 
+function sendPresence(online = true) {
+  const completedTiles = scanTileStates.filter((state) => state === 'done').length;
+  const payload = {
+    clientId: PRESENCE_CLIENT_ID, online, camera: Boolean(stream), stage: workflowStage,
+    count: candidates.filter((item) => item.keep && item.name.trim()).length,
+    progress: workflowStage === 'scanning'
+      ? { done: completedTiles, total: SCAN_TILE_COUNT }
+      : workflowStage === 'guiding' ? { done: guideIndex, total: arrangement.length } : null,
+  };
+  const body = JSON.stringify(payload);
+  if (!online && navigator.sendBeacon) {
+    navigator.sendBeacon('/api/presence', new Blob([body], { type: 'application/json' }));
+    return;
+  }
+  void fetch('/api/presence', { method: 'POST', headers: { 'content-type': 'application/json' }, body, keepalive: true }).catch(() => {});
+}
+
 function setToast(message, persistent = false) {
   const toast = $('scanToast');
   toast.textContent = message;
@@ -81,6 +108,7 @@ function setView(view) {
   }
   const names = { candidates: '스캔한 물건', style: '정리 스타일', plan: '정리 배치안', guide: '정리 안내' };
   $('drawerLabel').textContent = `${$('zoneName').value.trim() || '공간'} · ${names[view] || '정리'}`;
+  sendPresence();
 }
 
 function normalizedLabel(label) {
@@ -177,6 +205,7 @@ async function startCamera() {
     } else {
       workflowStage = 'ready';
     }
+    sendPresence();
     $('cameraEmpty').hidden = true;
     document.body.classList.add('camera-live');
     $('startCamera').textContent = '카메라 켜기';
@@ -607,8 +636,8 @@ function finishScan(id) {
   updateActionButton();
   updateRoiOverlay();
   const waitingForAi = modelReady && !scanRoiEnrichmentRequested;
-  if (!candidates.length && !waitingForAi) setToast('선택한 영역에서 물체 후보를 찾지 못했어요. 영역과 조명을 확인해 다시 스캔해 주세요.', true);
-  else setToast(waitingForAi ? '브라우저 분석이 끝났어요. Mac AI가 물체 이름을 보완하고 있습니다.' : '영역 분석이 끝났어요. 물체 목록을 확인하고 정리 스타일을 골라주세요.', true);
+  if (!candidates.length && !waitingForAi) setToast('물체를 찾지 못했어요. 영역을 확인해 다시 스캔해 주세요.', true);
+  else setToast(waitingForAi ? 'AI가 물체 이름을 확인 중이에요.' : '물체 후보를 확인해 주세요.');
   void enrichRoiWithServer(scanSessionId);
 }
 
@@ -693,6 +722,7 @@ function retryFailedTiles() {
 
 function editScanRegion() {
   workflowStage = 'ready';
+  sendPresence();
   candidates = [];
   arrangement = [];
   activeRoiVideo = null;
@@ -713,60 +743,85 @@ const STYLE_DETAILS = {
   cozy: { label: '아늑하게', description: '물건을 작은 그룹으로 모아 편안한 느낌을 만들어요.' },
 };
 
-function targetCenter(index, count) {
-  if (selectedStyle === 'minimal') {
-    const slots = [[.18,.18],[.5,.16],[.82,.18],[.12,.5],[.88,.5],[.18,.82],[.5,.84],[.82,.82]];
-    return slots[index % slots.length];
+async function blobToBase64(blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
   }
-  if (selectedStyle === 'focus') {
-    const slots = [[.5,.68],[.32,.34],[.68,.34],[.22,.68],[.78,.68],[.4,.18],[.6,.18],[.5,.43]];
-    return slots[index % slots.length];
-  }
-  const slots = [[.25,.28],[.42,.28],[.25,.48],[.42,.48],[.67,.28],[.84,.28],[.67,.48],[.84,.48],[.5,.75]];
-  return slots[index % slots.length];
+  return btoa(binary);
 }
 
-function makePlan() {
+async function makePlan() {
   const items = candidates.filter((item) => item.keep && item.name.trim());
   if (!items.length) return;
-  const region = activeRoiVideo || { x: 0, y: 0, w: 1, h: 1 };
-  const toVideoPoint = ([x, y]) => [region.x + x * region.w, region.y + y * region.h];
-  arrangement = items.map((item, index) => {
-    let [cx, cy] = toVideoPoint(targetCenter(index, items.length));
-    const sourceX = item.box.x + item.box.w / 2;
-    const sourceY = item.box.y + item.box.h / 2;
-    for (let offset = 0; offset < 8; offset++) {
-      const candidate = toVideoPoint(targetCenter(index + offset, items.length));
-      if (Math.hypot(candidate[0] - sourceX, candidate[1] - sourceY) > .22) { [cx, cy] = candidate; break; }
-    }
-    const w = Math.min(region.w * .22, Math.max(region.w * .075, item.box.w));
-    const h = Math.min(region.h * .20, Math.max(region.h * .07, item.box.h));
-    const x = Math.max(region.x, Math.min(region.x + region.w - w, cx - w / 2));
-    const y = Math.max(region.y, Math.min(region.y + region.h - h, cy - h / 2));
-    const trackId = item.trackId || `scan-${scanSessionId}-object-${index + 1}`;
-    item.trackId = trackId;
-    return {
-      name: item.name.trim(), sourceName: item.sourceName || item.name.trim(), detectorName: item.detectorName,
-      trackId,
-      source: { ...item.box }, target: { x, y, w, h }, index,
-    };
-  });
   workflowStage = 'planning';
-  const detail = STYLE_DETAILS[selectedStyle];
-  $('planTitle').textContent = `${detail.label} 배치안 · ${arrangement.length}개 물건`;
-  $('planCopy').textContent = `${detail.description} 카메라 화면의 점선 위치로 한 개씩 옮겨보세요.`;
-  const list = $('planSteps');
-  list.replaceChildren();
-  arrangement.forEach((step, index) => {
-    const row = document.createElement('li');
-    row.innerHTML = `<span class="step-number">${index + 1}</span><span><strong></strong><small>화면의 점선 위치로 옮기기</small></span>`;
-    row.querySelector('strong').textContent = step.name;
-    list.append(row);
-  });
-  setView('plan');
-  setDrawerOpen(true);
-  updateActionButton();
-  draw();
+  sendPresence();
+  const region = activeRoiVideo || { x: 0, y: 0, w: 1, h: 1 };
+  const button = $('makePlanButton');
+  button.disabled = true;
+  button.textContent = 'AI가 사진을 보고 배치 중…';
+  setToast('사진의 빈 공간과 물건 위치를 살펴 배치안을 만들고 있어요.');
+  try {
+    const snapshot = await scanRoiBlobPromise;
+    if (!snapshot?.blob) throw new Error('스캔 이미지를 찾지 못했어요. 공간을 다시 스캔해 주세요.');
+    const image = await blobToBase64(snapshot.blob);
+    const payloadItems = items.map((item, id) => {
+      const left = Math.max(0, (item.box.x - region.x) / region.w);
+      const top = Math.max(0, (item.box.y - region.y) / region.h);
+      const right = Math.min(1, (item.box.x + item.box.w - region.x) / region.w);
+      const bottom = Math.min(1, (item.box.y + item.box.h - region.y) / region.h);
+      return { id, name: item.name.trim(), box: { x: left, y: top, w: Math.max(.001, right - left), h: Math.max(.001, bottom - top) } };
+    });
+    const response = await fetch('/api/plan', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ image, width: snapshot.width, height: snapshot.height, style: selectedStyle, items: payloadItems }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || 'AI가 배치안을 만들지 못했어요. 서버와 모델 상태를 확인해 주세요.');
+    const byId = new Map(items.map((item, id) => [id, item]));
+    arrangement = result.placements.slice().sort((a, b) => a.order - b.order).map((placement, index) => {
+      const item = byId.get(placement.id);
+      if (!item) throw new Error('AI 배치안과 물건 목록이 일치하지 않아요. 다시 스캔해 주세요.');
+      const w = Math.min(region.w * .22, Math.max(region.w * .075, item.box.w));
+      const h = Math.min(region.h * .20, Math.max(region.h * .07, item.box.h));
+      const cx = region.x + placement.center.x * region.w;
+      const cy = region.y + placement.center.y * region.h;
+      const x = Math.max(region.x, Math.min(region.x + region.w - w, cx - w / 2));
+      const y = Math.max(region.y, Math.min(region.y + region.h - h, cy - h / 2));
+      const trackId = item.trackId || `scan-${scanSessionId}-object-${placement.id + 1}`;
+      item.trackId = trackId;
+      return {
+        name: item.name.trim(), sourceName: item.sourceName || item.name.trim(), detectorName: item.detectorName,
+        trackId, source: { ...item.box }, target: { x, y, w, h }, index, reason: placement.reason,
+      };
+    });
+    if (arrangement.length !== items.length) throw new Error('AI가 일부 물건의 위치를 정하지 못했어요. 다시 시도해 주세요.');
+    workflowStage = 'planning';
+    const detail = STYLE_DETAILS[selectedStyle];
+    $('planTitle').textContent = `AI ${detail.label} 배치안 · ${arrangement.length}개 물건`;
+    $('planCopy').textContent = `${result.summary || detail.description} 카메라와 책상을 고정한 상태에서 점선 위치로 옮겨보세요.`;
+    const list = $('planSteps');
+    list.replaceChildren();
+    arrangement.forEach((step, index) => {
+      const row = document.createElement('li');
+      row.innerHTML = `<span class="step-number">${index + 1}</span><span><strong></strong><small></small></span>`;
+      row.querySelector('strong').textContent = step.name;
+      row.querySelector('small').textContent = step.reason;
+      list.append(row);
+    });
+    setView('plan');
+    setDrawerOpen(true);
+    updateActionButton();
+    draw();
+  } catch (error) {
+    workflowStage = 'scanned';
+    sendPresence();
+    setToast(error.message || 'AI 배치 계산에 실패했어요. 서버 상태를 확인해 주세요.', true);
+  } finally {
+    button.disabled = false;
+    button.textContent = '이 스타일로 AI 배치안 만들기';
+  }
 }
 
 function startGuide() {
@@ -967,7 +1022,7 @@ async function enrichRoiWithServer(sessionId) {
     renderCandidates();
     draw();
     if (!candidates.length) setToast('선택 영역에서 물체를 찾지 못했어요. 스캔 범위와 조명을 확인해 주세요.', true);
-    else setToast(`분석 결과가 도착했어요. 물건 ${candidates.length}개를 목록에 표시했어요.`, true);
+    else setToast(`물건 ${candidates.length}개를 찾았어요.`);
   } catch (error) {
     if (sessionId === scanSessionId) {
       scanAiStatus = 'failed';
@@ -1109,11 +1164,15 @@ $('drawerHandle').addEventListener('click', () => {
 });
 $('facing').addEventListener('change', () => { if (stream) { stopCamera(); startCamera(); } });
 video.addEventListener('loadedmetadata', () => { resizeCanvas(); updateRoiOverlay(); draw(); });
+document.addEventListener('visibilitychange', () => sendPresence());
+window.setInterval(() => sendPresence(), 15_000);
 window.addEventListener('pagehide', () => {
+  sendPresence(false);
   if (stream) stream.getTracks().forEach((track) => track.stop());
   if (inferenceWorker) inferenceWorker.terminate();
 });
 
+sendPresence();
 initializeDetector();
 checkHealth();
 requestAnimationFrame(animate);
