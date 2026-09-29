@@ -4,14 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f3efe4">
-  <meta name="description" content="고정 카메라로 공간을 스캔하고 원하는 스타일로 정리하도록 돕는 FixLens">
-  <title>FixLens · 공간 정리 안내</title>
+  <meta name="description" content="책상 배치를 저장하고 청소 후 다시 놓도록 돕는 FixLens">
+  <title>FixLens · 책상 배치 기억</title>
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="./" aria-label="FixLens"><span class="logo" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M6 27V6h20v21M6 14h20M6 21h20M16 14v7"/><circle cx="22" cy="10" r="2"/></svg></span><span>FixLens</span></a>
-    <span class="product-label">공간 정리</span>
+    <span class="product-label">책상 배치 기억</span>
     <label class="zone-field"><span class="zone-mark" aria-hidden="true">⌂</span><span class="visually-hidden">공간 이름</span><input id="zoneName" maxlength="40" value="책상 위" aria-label="공간 이름"></label>
   </header>
   <main class="camera-layout">
@@ -21,9 +21,9 @@
       <p id="roiHint" class="roi-hint" hidden>사각형 안에 스캔할 곳을 맞춘 다음 시작하세요.</p>
       <div id="cameraEmpty" class="camera-empty">
         <span class="camera-glyph" aria-hidden="true">⌂</span>
-        <strong id="emptyTitle">공간을 비춰주세요</strong>
+        <strong id="emptyTitle">책상을 비춰주세요</strong>
         <button id="startCamera" class="primary start-button" type="button">카메라 켜기</button>
-        <p id="cameraMessage" class="camera-message">보이는 장면에서 물건 배치를 추정합니다.</p>
+        <p id="cameraMessage" class="camera-message">정리 전 배치를 저장하고 나중에 다시 놓을 수 있어요.</p>
       </div>
       <div id="orientationHint" class="orientation-hint" role="status" aria-live="polite">
         <span aria-hidden="true">⟳</span>
@@ -55,7 +55,7 @@
     </aside>
     <section id="drawer" class="drawer" aria-label="공간 재구성 결과">
       <button id="drawerHandle" class="drawer-handle" type="button" aria-expanded="false" aria-controls="drawerBody">
-        <span id="drawerLabel">배치도 · 스캔 전</span>
+        <span id="drawerLabel">배치 저장·복원</span>
         <span class="drawer-chevron" aria-hidden="true">⌃</span>
       </button>
       <div id="drawerBody" class="drawer-body" hidden>
@@ -64,9 +64,13 @@
           <p id="scanSummary" class="panel-copy">책상 전체가 보이게 카메라를 고정하고 스캔을 시작해요.</p>
           <div id="scanTileSummary" class="tile-summary" hidden></div>
           <ul id="candidates" class="objects"><li class="empty-result">카메라에 물체를 비추면 윤곽을 표시해요.</li></ul>
+          <p id="savedLayoutSummary" class="panel-copy">저장된 책상 배치가 없어요. 정리 전 스캔해 현재 배치를 저장할 수 있습니다.</p>
+          <button id="saveLayoutButton" class="quiet-button wide" type="button" disabled>현재 배치 저장</button>
+          <button id="restoreLayoutButton" class="primary wide" type="button" disabled>저장한 배치로 되돌리기</button>
+          <button id="deleteLayoutButton" class="quiet-button" type="button" hidden>저장된 배치 삭제</button>
           <button id="retryTilesButton" class="quiet-button" type="button" hidden>실패한 구역 다시 분석</button>
           <button id="editRegionButton" class="quiet-button" type="button" hidden>스캔 영역 다시 지정</button>
-          <button id="continueStyleButton" class="primary wide" type="button" disabled>정리 스타일 고르기</button>
+          <button id="continueStyleButton" class="quiet-button wide" type="button" disabled>새 배치안 만들기</button>
         </section>
         <section id="styleSection" class="drawer-section" hidden>
           <p class="section-title">원하는 정리 스타일</p>

@@ -1,5 +1,9 @@
 import { DetectionState } from './detection-state.mjs';
 import { ArAnchorPreview } from './ar-anchor-preview.mjs';
+import {
+  createSavedLayout, createManualRestoreArrangement, readSavedLayout,
+  writeSavedLayout, deleteSavedLayout,
+} from './layout-memory.mjs';
 
 const $ = (id) => document.getElementById(id);
 const video = $('video');
@@ -61,6 +65,7 @@ let scanAiStatus = 'unavailable';
 let candidateReviewTouched = false;
 let selectedStyle = 'minimal';
 let arrangement = [];
+let arrangementMode = 'suggested';
 let guideIndex = 0;
 let skippedGuideSteps = 0;
 let targetDetected = false;
@@ -156,7 +161,7 @@ function stopCamera(message = '카메라가 꺼져 있어요.') {
   video.srcObject = null;
   $('cameraEmpty').hidden = false;
   $('arCapability').hidden = true;
-  $('emptyTitle').textContent = '공간을 비춰주세요';
+  $('emptyTitle').textContent = '책상을 비춰주세요';
   $('cameraMessage').textContent = message;
   $('startCamera').disabled = false;
   $('stopCamera').disabled = true;
@@ -166,6 +171,7 @@ function stopCamera(message = '카메라가 꺼져 있어요.') {
   fullscreenRequestedByApp = false;
   updateActionButton();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  updateSavedLayoutUI();
 }
 
 function requestCameraPresentation() {
@@ -196,12 +202,12 @@ async function startCamera() {
     const returningToGuide = workflowStage === 'guiding';
     if (returningToGuide) {
       detectionState.clear();
-      detectionState.seed(arrangement.map((step) => ({
+      if (arrangementMode !== 'restore') detectionState.seed(arrangement.map((step) => ({
         name: step.sourceName, sourceName: step.sourceName, detectorName: step.detectorName,
         trackId: step.trackId, box: step.source, score: 1,
       })));
       resetMovementEvidence();
-      recognitionActive = true;
+      recognitionActive = arrangementMode !== 'restore';
     } else {
       workflowStage = 'ready';
     }
@@ -214,6 +220,7 @@ async function startCamera() {
     void updateArCapability();
     $('stopCamera').disabled = false;
     updateActionButton();
+    updateSavedLayoutUI();
     acquired.getVideoTracks().forEach((track) => track.addEventListener('ended', () => stopCamera('카메라 연결이 끝났어요.')));
     resizeCanvas();
     updateRoiOverlay();
@@ -468,8 +475,6 @@ function draw() {
     const visiblePlan = workflowStage === 'guiding' ? arrangement[guideIndex] ? [arrangement[guideIndex]] : [] : arrangement;
     visiblePlan.forEach((step, index) => {
       const { source, target } = step;
-      const sx = source.x * canvas.width; const sy = source.y * canvas.height;
-      const sw = source.w * canvas.width; const sh = source.h * canvas.height;
       const tx = target.x * canvas.width; const ty = target.y * canvas.height;
       const tw = target.w * canvas.width; const th = target.h * canvas.height;
       ctx.save();
@@ -479,35 +484,108 @@ function draw() {
       ctx.fillStyle = '#f4c66b25';
       ctx.strokeRect(tx, ty, tw, th);
       ctx.fillRect(tx, ty, tw, th);
-      ctx.setLineDash([5 * scale, 4 * scale]);
-      ctx.strokeStyle = '#f4c66b';
-      ctx.strokeRect(sx, sy, sw, sh);
-      ctx.setLineDash([]);
-      ctx.fillStyle = '#374235';
-      ctx.fillRect(Math.max(0, sx), Math.max(0, sy - 24 * scale), 84 * scale, 21 * scale);
-      ctx.fillStyle = '#fff8e8';
-      ctx.font = `${Math.max(11, 13 * scale)}px -apple-system, sans-serif`;
-      ctx.fillText(workflowStage === 'guiding' ? '옮길 물건' : '현재 위치', Math.max(4, sx + 4 * scale), Math.max(13, sy - 9 * scale));
-      const startX = sx + sw / 2; const startY = sy + sh / 2;
-      const endX = tx + tw / 2; const endY = ty + th / 2;
-      const bend = Math.max(28 * scale, Math.min(75 * scale, Math.abs(endX - startX) * .18));
-      const midX = (startX + endX) / 2;
-      const midY = Math.min(startY, endY) - bend;
-      ctx.beginPath(); ctx.moveTo(startX, startY); ctx.quadraticCurveTo(midX, midY, endX, endY);
-      ctx.strokeStyle = workflowStage === 'guiding' ? '#f4c66b' : '#eee2c8';
-      ctx.lineWidth = Math.max(3, 5 * scale); ctx.stroke();
-      const angle = Math.atan2(endY - midY, endX - midX);
-      const head = 12 * scale;
-      ctx.beginPath(); ctx.moveTo(endX, endY);
-      ctx.lineTo(endX - head * Math.cos(angle - Math.PI / 6), endY - head * Math.sin(angle - Math.PI / 6));
-      ctx.lineTo(endX - head * Math.cos(angle + Math.PI / 6), endY - head * Math.sin(angle + Math.PI / 6));
-      ctx.closePath(); ctx.fillStyle = workflowStage === 'guiding' ? '#f4c66b' : '#eee2c8'; ctx.fill();
+      if (source) {
+        const sx = source.x * canvas.width; const sy = source.y * canvas.height;
+        const sw = source.w * canvas.width; const sh = source.h * canvas.height;
+        ctx.setLineDash([5 * scale, 4 * scale]);
+        ctx.strokeStyle = '#f4c66b';
+        ctx.strokeRect(sx, sy, sw, sh);
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#374235';
+        ctx.fillRect(Math.max(0, sx), Math.max(0, sy - 24 * scale), 84 * scale, 21 * scale);
+        ctx.fillStyle = '#fff8e8';
+        ctx.font = `${Math.max(11, 13 * scale)}px -apple-system, sans-serif`;
+        ctx.fillText(workflowStage === 'guiding' ? '옮길 물건' : '현재 위치', Math.max(4, sx + 4 * scale), Math.max(13, sy - 9 * scale));
+        const startX = sx + sw / 2; const startY = sy + sh / 2;
+        const endX = tx + tw / 2; const endY = ty + th / 2;
+        const bend = Math.max(28 * scale, Math.min(75 * scale, Math.abs(endX - startX) * .18));
+        const midX = (startX + endX) / 2;
+        const midY = Math.min(startY, endY) - bend;
+        ctx.beginPath(); ctx.moveTo(startX, startY); ctx.quadraticCurveTo(midX, midY, endX, endY);
+        ctx.strokeStyle = workflowStage === 'guiding' ? '#f4c66b' : '#eee2c8';
+        ctx.lineWidth = Math.max(3, 5 * scale); ctx.stroke();
+        const angle = Math.atan2(endY - midY, endX - midX);
+        const head = 12 * scale;
+        ctx.beginPath(); ctx.moveTo(endX, endY);
+        ctx.lineTo(endX - head * Math.cos(angle - Math.PI / 6), endY - head * Math.sin(angle - Math.PI / 6));
+        ctx.lineTo(endX - head * Math.cos(angle + Math.PI / 6), endY - head * Math.sin(angle + Math.PI / 6));
+        ctx.closePath(); ctx.fillStyle = workflowStage === 'guiding' ? '#f4c66b' : '#eee2c8'; ctx.fill();
+      }
       ctx.font = `${Math.max(12, 15 * scale)}px -apple-system, sans-serif`;
       ctx.fillStyle = '#f8f3e8';
-      ctx.fillText(workflowStage === 'guiding' ? '여기에 놓기' : `${index + 1}. ${step.name}`, Math.max(4, tx), Math.max(18, ty - 7 * scale));
+      ctx.fillText(workflowStage === 'guiding' ? `${step.name} 놓기` : `${index + 1}. ${step.name}`, Math.max(4, tx), Math.max(18, ty - 7 * scale));
       ctx.restore();
     });
   }
+}
+
+function updateSavedLayoutUI() {
+  let saved = null;
+  try { saved = readSavedLayout(localStorage, $('zoneName').value); } catch { /* Storage can be unavailable. */ }
+  const canRestore = Boolean(saved && stream && workflowStage !== 'scanning');
+  const canSave = workflowStage === 'scanned' && scanAiStatus !== 'pending'
+    && candidates.some((item) => item.keep && item.name.trim());
+  $('savedLayoutSummary').textContent = saved
+    ? `이 브라우저에 저장된 ${saved.items.length}개 물건의 배치가 있어요. 같은 각도로 책상을 비추고 영역을 맞춰 주세요.`
+    : '저장된 책상 배치가 없어요. 정리 전 스캔해 현재 배치를 저장할 수 있습니다.';
+  $('saveLayoutButton').disabled = !canSave;
+  $('saveLayoutButton').textContent = saved ? '현재 배치로 덮어쓰기' : '현재 배치 저장';
+  $('restoreLayoutButton').disabled = !canRestore;
+  $('restoreLayoutButton').hidden = !saved;
+  $('deleteLayoutButton').hidden = !saved;
+}
+
+function saveCurrentLayout() {
+  try {
+    const zoneName = $('zoneName').value;
+    const saved = createSavedLayout(zoneName, activeRoiVideo || videoRoiFromView(), candidates);
+    writeSavedLayout(localStorage, zoneName, saved);
+    updateSavedLayoutUI();
+    setToast(`${saved.items.length}개 물건의 위치를 이 브라우저에 저장했어요.`);
+  } catch (error) { setToast(error.message || '배치를 저장하지 못했어요.', true); }
+}
+
+function showArrangementPlan() {
+  const list = $('planSteps');
+  list.replaceChildren();
+  arrangement.forEach((step, index) => {
+    const row = document.createElement('li');
+    row.innerHTML = `<span class="step-number">${index + 1}</span><span><strong></strong><small></small></span>`;
+    row.querySelector('strong').textContent = step.name;
+    row.querySelector('small').textContent = step.reason;
+    list.append(row);
+  });
+  $('editStyleButton').textContent = arrangementMode === 'restore' ? '책상 영역 다시 맞추기' : '스타일 다시 고르기';
+  setView('plan');
+  setDrawerOpen(true);
+  updateActionButton();
+  updateRoiOverlay();
+  draw();
+}
+
+function planSavedLayout() {
+  try {
+    if (!stream) throw new Error('카메라를 먼저 켜 주세요.');
+    const saved = readSavedLayout(localStorage, $('zoneName').value);
+    if (!saved) throw new Error('저장된 배치가 없어요. 먼저 현재 책상을 스캔해 저장해 주세요.');
+    const region = videoRoiFromView();
+    arrangement = createManualRestoreArrangement(saved, region);
+    arrangementMode = 'restore';
+    activeRoiVideo = region;
+    candidates = [];
+    workflowStage = 'planning';
+    $('planTitle').textContent = `저장한 책상 배치 · ${arrangement.length}개 물건`;
+    $('planCopy').textContent = '카메라를 저장할 때와 같은 각도로 고정해 주세요. 점선 위치를 확인하고 물건을 하나씩 놓습니다.';
+    showArrangementPlan();
+  } catch (error) { setToast(error.message || '저장된 배치를 불러오지 못했어요.', true); }
+}
+
+function removeSavedLayout() {
+  try {
+    deleteSavedLayout(localStorage, $('zoneName').value);
+    updateSavedLayoutUI();
+    setToast('이 브라우저에 저장된 책상 배치를 삭제했어요.');
+  } catch { setToast('저장된 배치를 삭제하지 못했어요.', true); }
 }
 
 function updateLayoutButton() {
@@ -518,10 +596,11 @@ function updateLayoutButton() {
   continueButton.textContent = scanAiStatus === 'pending'
     ? '물건을 다시 확인하고 있어요…'
     : scanAiStatus === 'failed'
-      ? '목록을 직접 확인하고 스타일 고르기'
-      : '물건 목록 확인 후 정리 스타일 고르기';
+      ? '목록을 직접 확인하고 새 배치안 만들기'
+      : '새 배치안 만들기';
   const names = { candidates: '스캔한 물건', style: '정리 스타일', plan: '정리 배치안', guide: '정리 안내' };
   $('drawerLabel').textContent = `${$('zoneName').value.trim() || '공간'} · ${names[activeView] || '정리'}`;
+  updateSavedLayoutUI();
 }
 
 function renderCandidates() {
@@ -549,7 +628,7 @@ function renderCandidates() {
     name.className = 'candidate-name'; name.value = item.name; name.maxLength = 48;
     name.disabled = workflowStage === 'scanning';
     name.setAttribute('aria-label', '공간 요소 이름');
-    name.addEventListener('input', () => { candidateReviewTouched = true; item.userEdited = true; item.name = name.value; draw(); });
+    name.addEventListener('input', () => { candidateReviewTouched = true; item.userEdited = true; item.name = name.value; updateLayoutButton(); draw(); });
     label.append(checkbox, name);
     row.append(label);
     list.append(row);
@@ -797,23 +876,12 @@ async function makePlan() {
       };
     });
     if (arrangement.length !== items.length) throw new Error('AI가 일부 물건의 위치를 정하지 못했어요. 다시 시도해 주세요.');
+    arrangementMode = 'suggested';
     workflowStage = 'planning';
     const detail = STYLE_DETAILS[selectedStyle];
     $('planTitle').textContent = `AI ${detail.label} 배치안 · ${arrangement.length}개 물건`;
     $('planCopy').textContent = `${result.summary || detail.description} 카메라와 책상을 고정한 상태에서 점선 위치로 옮겨보세요.`;
-    const list = $('planSteps');
-    list.replaceChildren();
-    arrangement.forEach((step, index) => {
-      const row = document.createElement('li');
-      row.innerHTML = `<span class="step-number">${index + 1}</span><span><strong></strong><small></small></span>`;
-      row.querySelector('strong').textContent = step.name;
-      row.querySelector('small').textContent = step.reason;
-      list.append(row);
-    });
-    setView('plan');
-    setDrawerOpen(true);
-    updateActionButton();
-    draw();
+    showArrangementPlan();
   } catch (error) {
     workflowStage = 'scanned';
     sendPresence();
@@ -827,9 +895,9 @@ async function makePlan() {
 function startGuide() {
   if (!arrangement.length) return;
   workflowStage = 'guiding';
-  recognitionActive = true;
+  recognitionActive = arrangementMode !== 'restore';
   detectionState.clear();
-  detectionState.seed(arrangement.map((step) => ({
+  if (recognitionActive) detectionState.seed(arrangement.map((step) => ({
     name: step.sourceName, sourceName: step.sourceName, detectorName: step.detectorName,
     trackId: step.trackId, box: step.source, score: 1,
   })));
@@ -858,15 +926,18 @@ function showGuideStep() {
   $('guideInstruction').textContent = complete
     ? skippedGuideSteps
       ? '건너뛴 물건은 스캔 목록에서 다시 확인하고 배치안을 만들 수 있어요.'
-      : '선택한 스타일에 맞춰 정리했어요. 화면에서 결과를 확인해 주세요.'
-    : '카메라의 노란 테두리 물건을 점선 위치까지 옮겨주세요. 카메라와 책상은 고정해 둡니다.';
-  $('moveStatus').textContent = complete ? '정리 과정을 마쳤습니다.' : moveStatusText();
+      : arrangementMode === 'restore' ? '저장한 책상 배치로 다시 놓았어요.' : '선택한 스타일에 맞춰 정리했어요. 화면에서 결과를 확인해 주세요.'
+    : arrangementMode === 'restore'
+      ? '저장된 점선 위치에 이 물건을 놓고 직접 확인해 주세요. 카메라와 책상은 고정해 둡니다.'
+      : '카메라의 노란 테두리 물건을 점선 위치까지 옮겨주세요. 카메라와 책상은 고정해 둡니다.';
+  $('moveStatus').textContent = complete ? '정리 과정을 마쳤습니다.'
+    : arrangementMode === 'restore' ? '저장된 배치를 보며 직접 놓는 안내입니다. 자동 이동 판정은 사용하지 않아요.' : moveStatusText();
   $('confirmMoveButton').hidden = complete;
   $('skipMoveButton').hidden = complete;
   $('finishGuideButton').hidden = !complete;
   $('finishGuideButton').textContent = skippedGuideSteps ? '안내 종료' : '정리 완료';
-  $('startArAnchorButton').hidden = !webxrArSupported || complete || !stream;
-  $('confirmMoveButton').textContent = targetDetected ? '감지된 위치 확인' : '이동 완료 확인';
+  $('startArAnchorButton').hidden = arrangementMode === 'restore' || !webxrArSupported || complete || !stream;
+  $('confirmMoveButton').textContent = arrangementMode === 'restore' ? '놓았어요 · 다음 물건' : targetDetected ? '감지된 위치 확인' : '이동 완료 확인';
   $('drawerLabel').textContent = complete
     ? skippedGuideSteps ? `안내 완료 · ${skippedGuideSteps}개 건너뜀 · 결과 보기` : '정리 완료 · 결과 보기'
     : `${guideIndex + 1}/${arrangement.length} · ${step.name} 옮기는 중 · 안내 열기`;
@@ -1049,7 +1120,7 @@ function initializeDetector() {
       if (data.type === 'ready') {
         detectorReady = true;
         updateActionButton();
-        $('cameraMessage').textContent = '감지 모델 준비 완료 · 카메라를 고정하고 공간 스캔을 시작하세요.';
+        $('cameraMessage').textContent = '카메라를 고정하고 책상 배치를 저장하거나 불러오세요.';
         return;
       }
       if (data.type === 'load-error') {
@@ -1125,10 +1196,18 @@ window.addEventListener('pointermove', moveRoiDrag);
 window.addEventListener('pointerup', endRoiDrag);
 window.addEventListener('pointercancel', endRoiDrag);
 $('continueStyleButton').addEventListener('click', () => { setView('style'); setDrawerOpen(true); });
+$('saveLayoutButton').addEventListener('click', saveCurrentLayout);
+$('restoreLayoutButton').addEventListener('click', planSavedLayout);
+$('deleteLayoutButton').addEventListener('click', removeSavedLayout);
 $('makePlanButton').addEventListener('click', makePlan);
 $('startGuideButton').addEventListener('click', startGuide);
 $('startArAnchorButton').addEventListener('click', startArAnchorGuide);
-$('editStyleButton').addEventListener('click', () => { workflowStage = 'scanned'; setView('style'); draw(); });
+$('editStyleButton').addEventListener('click', () => {
+  if (arrangementMode === 'restore') {
+    workflowStage = 'ready'; arrangement = []; activeRoiVideo = null;
+    setView('candidates'); setDrawerOpen(false); updateRoiOverlay(); updateSavedLayoutUI(); draw();
+  } else { workflowStage = 'scanned'; setView('style'); draw(); }
+});
 $('confirmMoveButton').addEventListener('click', () => {
   guideIndex++;
   resetMovementEvidence();
@@ -1148,7 +1227,9 @@ $('finishGuideButton').addEventListener('click', () => {
   workflowStage = 'completed'; recognitionActive = false; detectionState.clear(); setView('candidates'); setDrawerOpen(false); updateActionButton();
   setToast(skippedGuideSteps
     ? `안내를 종료했어요. ${skippedGuideSteps}개 물건을 건너뛰었습니다.`
-    : '정리가 끝났어요. 다시 스캔해 다른 배치도 만들어볼 수 있습니다.');
+    : arrangementMode === 'restore'
+      ? '저장한 책상 배치로 되돌리기를 마쳤어요.'
+      : '정리가 끝났어요. 다시 스캔해 다른 배치도 만들어볼 수 있습니다.');
 });
 $('styleSection').querySelectorAll('[data-style]').forEach((button) => button.addEventListener('click', () => {
   selectedStyle = button.dataset.style;
@@ -1163,6 +1244,7 @@ $('drawerHandle').addEventListener('click', () => {
   else { setView(activeView); renderCandidates(); setDrawerOpen(true); }
 });
 $('facing').addEventListener('change', () => { if (stream) { stopCamera(); startCamera(); } });
+$('zoneName').addEventListener('input', updateSavedLayoutUI);
 video.addEventListener('loadedmetadata', () => { resizeCanvas(); updateRoiOverlay(); draw(); });
 document.addEventListener('visibilitychange', () => sendPresence());
 window.setInterval(() => sendPresence(), 15_000);
@@ -1173,6 +1255,7 @@ window.addEventListener('pagehide', () => {
 });
 
 sendPresence();
+updateSavedLayoutUI();
 initializeDetector();
 checkHealth();
 requestAnimationFrame(animate);

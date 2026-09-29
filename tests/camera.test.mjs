@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-test('scan results stay visible and lead into a style plan and guided move', async () => {
+test('scan, save, and restore a desk layout without rescanning after cleanup', async () => {
   const html = await readFile(new URL('../dist/index.html', import.meta.url), 'utf8');
   const elements = new Map([...html.matchAll(/id="([^"]+)"/g)].map(([, id]) => [id, new FakeElement(id)]));
+  elements.get('zoneName').value = '책상 위';
   Object.assign(elements.get('video'), { videoWidth: 1280, videoHeight: 720, play: async () => {} });
   const frames = [];
   let worker;
@@ -13,10 +14,20 @@ test('scan results stay visible and lead into a style plan and guided move', asy
 
   globalThis.document = {
     activeElement: { tagName: 'BODY' },
+    addEventListener() {},
+    documentElement: {},
+    body: new FakeElement('body'),
     getElementById: (id) => { assert.ok(elements.has(id), `Missing #${id}`); return elements.get(id); },
     createElement: (tag) => tag === 'canvas' ? new FakeCanvas() : new FakeElement(tag),
   };
-  globalThis.window = { isSecureContext: true, devicePixelRatio: 1, addEventListener() {} };
+  globalThis.window = { isSecureContext: true, devicePixelRatio: 1, addEventListener() {}, setInterval() {} };
+  globalThis.screen = { orientation: { lock: async () => {}, unlock() {} } };
+  const savedValues = new Map();
+  globalThis.localStorage = {
+    getItem: (key) => savedValues.get(key) ?? null,
+    setItem: (key, value) => savedValues.set(key, value),
+    removeItem: (key) => savedValues.delete(key),
+  };
   globalThis.requestAnimationFrame = (callback) => { frames.push(callback); return frames.length; };
   globalThis.setTimeout = () => 1;
   globalThis.clearTimeout = () => {};
@@ -73,28 +84,24 @@ test('scan results stay visible and lead into a style plan and guided move', asy
   assert.equal(elements.get('candidateCount').textContent, '2', 'server detections are merged into the list');
   assert.equal(elements.get('continueStyleButton').disabled, false, 'the next step unlocks after AI review');
 
-  await elements.get('continueStyleButton').click();
-  assert.equal(elements.get('candidateSection').hidden, true);
-  assert.equal(elements.get('styleSection').hidden, false, 'style selection is reachable');
-  await elements.get('makePlanButton').click();
-  assert.equal(elements.get('styleSection').hidden, true);
-  assert.equal(elements.get('planSection').hidden, false, 'a placement plan is generated');
+  await elements.get('saveLayoutButton').click();
+  assert.equal(elements.get('restoreLayoutButton').disabled, false, 'saved layout can be restored');
+  assert.ok(savedValues.size > 0, 'layout is stored only after explicit save');
+  await elements.get('stopCamera').click();
+  await elements.get('startCamera').click();
+  assert.equal(elements.get('restoreLayoutButton').disabled, false, 'saved layout remains available after reopening the camera');
+  await elements.get('restoreLayoutButton').click();
+  assert.equal(elements.get('planSection').hidden, false, 'saved positions create a plan without a second scan');
   assert.equal(elements.get('planSteps').children.length, 2);
   await elements.get('startGuideButton').click();
-  assert.equal(elements.get('planSection').hidden, true);
-  assert.equal(elements.get('guideSection').hidden, false, 'guided movement is reachable');
-  assert.equal(elements.get('guideObjectName').textContent, '컵');
-  assert.equal(elements.get('guideProgressText').textContent, '진행 0 / 2');
+  assert.equal(elements.get('guideSection').hidden, false);
+  assert.equal(elements.get('confirmMoveButton').textContent, '놓았어요 · 다음 물건');
   await elements.get('confirmMoveButton').click();
-  assert.equal(elements.get('guideObjectName').textContent, '책');
-  assert.equal(elements.get('guideProgressText').textContent, '진행 1 / 2');
-  await elements.get('skipMoveButton').click();
-  assert.equal(elements.get('guideStepCount').textContent, '안내 완료 · 1개 건너뜀');
-  assert.equal(elements.get('finishGuideButton').textContent, '안내 종료');
-  assert.equal(elements.get('guideProgressTrack').attributes.get('aria-valuenow'), '100');
+  await elements.get('confirmMoveButton').click();
+  assert.equal(elements.get('guideStepCount').textContent, '모든 물건을 옮겼어요');
 
   await elements.get('stopCamera').click();
-  assert.equal(stopped, 1);
+  assert.equal(stopped, 2);
   assert.equal(elements.get('video').srcObject, null);
   assert.equal(elements.get('scanButton').disabled, true);
 });
@@ -133,6 +140,7 @@ class FakeElement {
     if (selector === 'span:last-child') return this.label = this.label || new FakeElement('button-label');
     if (selector === '.roi-label') return this.roiLabel = this.roiLabel || new FakeElement('roi-label');
     if (selector === 'strong') return this.strong = this.strong || Object.assign(new FakeElement('strong'), { tagName: 'STRONG' });
+    if (selector === 'small') return this.small = this.small || new FakeElement('small');
     return null;
   }
   querySelectorAll() { return []; }
